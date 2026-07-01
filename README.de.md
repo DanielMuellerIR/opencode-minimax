@@ -11,6 +11,27 @@ fehlschlagenden Test", „lagere das in eine eigene Datei aus"). Das Modell lies
 Dateien, macht die Änderung und prüft sein eigenes Ergebnis. Du siehst dir das Resultat an
 und behältst es oder verwirfst es.
 
+## TL;DR
+
+1. [OpenCode](https://opencode.ai) installieren und einen MiniMax-API-Key holen — ein
+   **Token-Plan**-Abo (der **Plus**-Plan für ~20 US$ enthält bereits ~1,7 Mrd. Tokens).
+2. **Key einmal ablegen** im macOS-Schlüsselbund (bleibt verschlüsselt, nie in einer Datei):
+   ```bash
+   security add-generic-password -a "$USER" -s minimax-api-key -w   # Key einfügen; Eingabe bleibt verborgen
+   ```
+3. Dieses Repo klonen und zusehen, wie es einen Bug für dich fixt:
+   ```bash
+   examples/run-demo.sh
+   ```
+4. Auf deinen eigenen Code loslassen — es editiert eine Wegwerf-Kopie, die du vor dem Behalten prüfst:
+   ```bash
+   examples/fix-in-sandbox.sh /pfad/zu/deinem/repo "Fixe den Absturz bei leerer Eingabe."
+   ```
+
+Alles Weitere erklärt nur diese Schritte, sichereren Gebrauch und wie du es freihändig aus
+deinem KI-Assistenten steuerst. Nicht auf macOS? Der [Einrichten](#einrichten)-Abschnitt
+beschreibt den Weg über die Umgebungsvariable.
+
 ## Einrichten
 
 Du brauchst drei Dinge:
@@ -22,21 +43,25 @@ Du brauchst drei Dinge:
    ```
 2. **Python 3.8+** (nur Standardbibliothek — nichts zu installieren).
 3. **Einen MiniMax-API-Key aus einem Token Plan.** Am günstigsten nutzt man MiniMax über ein
-   **Token-Plan**-Abo — es liefert ein großes monatliches Token-Kontingent statt
-   nutzungsabhängiger Abrechnung. Der **Plus**-Plan (zum jetzigen Stand rund 20 US$/Monat)
-   enthält bereits ein sehr üppiges Kontingent in der Größenordnung von 1,7 Milliarden Tokens,
-   was für delegierte Coding-Arbeit weit reicht. Auf der
-   [MiniMax-Plattform](https://www.minimax.io) einen Plan wählen, dann **aus dem Abo einen
-   API-Key generieren** — dieser Key ist der, den das Tool verwendet. Im Terminal verfügbar
-   machen:
+   **Token-Plan**-Abo — ein großes monatliches Token-Kontingent statt nutzungsabhängiger
+   Abrechnung. Der **Plus**-Plan (zum jetzigen Stand rund 20 US$/Monat) enthält bereits
+   ~1,7 Milliarden Tokens, was für delegierte Coding-Arbeit weit reicht. Auf der
+   [MiniMax-Plattform](https://www.minimax.io) einen Plan wählen, dann aus dem Abo einen
+   API-Key generieren.
+
+   **Sicher ablegen (empfohlen, macOS).** Den Key im Schlüsselbund halten — er bleibt
+   verschlüsselt und liegt nie in einer Datei oder deiner Shell-History:
    ```bash
-   # Im Terminal ausführen. Das setzt eine temporäre Umgebungsvariable, die nur für das
-   # aktuelle Terminal-Fenster gilt — neues Fenster, und sie ist weg.
+   # Fragt nach dem Key; einfügen — die Eingabe bleibt verborgen. (-U aktualisiert einen bestehenden Eintrag.)
+   security add-generic-password -a "$USER" -s minimax-api-key -w
+   ```
+   Das war's — das Tool und die Beispielskripte lesen den Key automatisch aus dem Schlüsselbund.
+
+   **Oder schnell:** stattdessen eine Umgebungsvariable für das aktuelle Terminal setzen:
+   ```bash
+   # Temporär — nur für dieses Terminal-Fenster. Für dauerhaft in ~/.zshrc eintragen (Klartext-Datei).
    export MINIMAX_API_KEY=dein-key-hier
    ```
-   Damit du ihn nicht jedes Mal neu eingeben musst: entweder diese Zeile ins Shell-Profil
-   aufnehmen (z. B. `~/.zshrc`), oder — sicherer — den Key im macOS-Schlüsselbund ablegen.
-   Beides ist unter **Den Key sicher halten** in den einklappbaren Abschnitten unten erklärt.
 
 Dann dieses Repository holen:
 
@@ -51,7 +76,6 @@ Eine fertige Demo fixt für dich eine absichtlich kaputte Funktion — in einer 
 deine eigenen Dateien werden nie angefasst:
 
 ```bash
-export MINIMAX_API_KEY=dein-key-hier
 examples/run-demo.sh
 ```
 
@@ -191,33 +215,22 @@ Das Ganze sind rund 200 Zeilen Python, die man in einem Rutsch liest.
 </details>
 
 <details>
-<summary><b>Den Key sicher halten</b> und andere Provider nutzen</summary>
+<summary><b>Einen anderen Provider</b> oder eine andere Key-Quelle nutzen</summary>
 
 <br>
-
-**Den Key sicher halten.** Das `export` im Setup setzt den Key nur für die aktuelle
-Terminal-Sitzung. Für eine dauerhafte Einrichtung gibt es zwei Wege:
-
-- **Shell-Profil** — die Zeile `export MINIMAX_API_KEY=...` in `~/.zshrc` (bzw. das Profil
-  deiner Shell) legen, dann hat jedes neue Terminal den Key. Einfach, aber der Key steht dann
-  im Klartext in einer Datei.
-- **macOS-Schlüsselbund** (sicherer — der Key bleibt verschlüsselt, nie in einer Datei oder
-  der Shell-History). Einmal ablegen:
-  ```bash
-  # Fragt nach dem Key; einfügen — die Eingabe bleibt verborgen und aus der Shell-History raus.
-  # (-U anhängen, um einen bestehenden Eintrag zu aktualisieren.)
-  security add-generic-password -a "$USER" -s minimax-api-key -w
-  ```
-  Dann liest das Tool den Key mit `--key-command` aus dem Schlüsselbund, statt aus einer
-  Umgebungsvariablen:
-  ```bash
-  minimax_agent.py --dir ./mein-projekt --sandbox \
-    --key-command "security find-generic-password -s minimax-api-key -w" "..."
-  ```
 
 **Andere Provider.** Außer den Defaults ist hier nichts MiniMax-spezifisch. `--base-url` auf
 einen beliebigen Anthropic-kompatiblen Endpunkt zeigen und `--model` entsprechend setzen; die
 genaue Modell-ID steht in der Doku des jeweiligen Providers.
+
+**Key-Quellen.** Das Tool sucht den Key in dieser Reihenfolge: `--key-command` (ein Kommando,
+das ihn ausgibt), dann `$MINIMAX_API_KEY`, dann — auf macOS — ein Schlüsselbund-Eintrag namens
+`minimax-api-key`. Mit `--key-command` liest man einen anders benannten Eintrag oder einen
+Passwort-Manager:
+```bash
+minimax_agent.py --dir ./mein-projekt --sandbox \
+  --key-command "security find-generic-password -s mein-anderer-key -w" "..."
+```
 
 </details>
 

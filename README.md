@@ -10,6 +10,26 @@ You point it at a folder and describe a task in plain language ("fix the failing
 "extract this into its own file"). The model reads your files, makes the change, and checks
 its own work. You review the result and keep it or throw it away.
 
+## TL;DR
+
+1. Install [OpenCode](https://opencode.ai) and get a MiniMax API key — a **Token Plan**
+   subscription (the ~US$20 **Plus** plan already includes ~1.7 billion tokens).
+2. **Store the key once** in your macOS Keychain (it stays encrypted, never in a file):
+   ```bash
+   security add-generic-password -a "$USER" -s minimax-api-key -w   # paste the key; input stays hidden
+   ```
+3. Clone this repo and watch it fix a bug for you:
+   ```bash
+   examples/run-demo.sh
+   ```
+4. Point it at your own code — it edits a throwaway copy you review before keeping:
+   ```bash
+   examples/fix-in-sandbox.sh /path/to/your/repo "Fix the crash on empty input."
+   ```
+
+Everything below just explains these steps, safer use, and how to drive it hands-free from your
+AI assistant. Not on macOS? The [Setup](#setup) section covers the environment-variable route.
+
 ## Setup
 
 You need three things:
@@ -20,20 +40,24 @@ You need three things:
    ```
 2. **Python 3.8+** (standard library only — nothing to install).
 3. **A MiniMax API key from a Token Plan.** The cost-effective way to use MiniMax is a
-   **Token Plan** subscription — it gives you a large monthly bucket of tokens instead of
-   metered pay-per-use. The **Plus** plan (around US$20/month at the time of writing) already
-   includes a very generous allowance, on the order of 1.7 billion tokens, which goes a long
-   way for delegated coding work. Pick a plan on the
-   [MiniMax platform](https://www.minimax.io), then **generate an API key from your
-   subscription** — that key is what this tool uses. Make it available in your terminal:
+   **Token Plan** subscription — a large monthly bucket of tokens instead of metered
+   pay-per-use. The **Plus** plan (~US$20/month at the time of writing) already includes
+   ~1.7 billion tokens, plenty for delegated coding. Pick a plan on the
+   [MiniMax platform](https://www.minimax.io), then generate an API key from your subscription.
+
+   **Store it securely (recommended, macOS).** Keep the key in your Keychain — it stays
+   encrypted and never sits in a file or your shell history:
    ```bash
-   # Run this in your terminal. It sets a temporary environment variable that lasts only for
-   # the current terminal window — open a new one and it's gone.
+   # Prompts for the key; paste it in — the input stays hidden. (-U updates an existing entry.)
+   security add-generic-password -a "$USER" -s minimax-api-key -w
+   ```
+   That's all — the tool and the example scripts read the key from the Keychain automatically.
+
+   **Or, the quick way:** set an environment variable for the current terminal instead:
+   ```bash
+   # Temporary — only for this terminal window. Add it to ~/.zshrc to persist (a plain-text file).
    export MINIMAX_API_KEY=your-key-here
    ```
-   To avoid re-typing it each time, either add that line to your shell profile (e.g.
-   `~/.zshrc`), or — more securely — store the key in the macOS Keychain. Both are explained
-   under **Keeping the key safe** in the collapsible sections below.
 
 Then get this repository:
 
@@ -48,7 +72,6 @@ A ready-made demo fixes a deliberately broken function for you, in a throwaway c
 own files are never touched:
 
 ```bash
-export MINIMAX_API_KEY=your-key-here
 examples/run-demo.sh
 ```
 
@@ -183,32 +206,21 @@ The whole thing is about 200 lines of Python you can read in one sitting.
 </details>
 
 <details>
-<summary><b>Keeping the key safe</b>, and using other providers</summary>
+<summary><b>Using a different provider</b>, or a different key source</summary>
 
 <br>
 
-**Keeping the key safe.** The `export` in the setup sets the key only for the current terminal
-session. For a permanent setup you have two options:
-
-- **Shell profile** — put the `export MINIMAX_API_KEY=...` line in `~/.zshrc` (or your shell's
-  profile) so every new terminal has it. Simple, but the key then sits in a plain-text file.
-- **macOS Keychain** (more secure — the key stays encrypted, never in a file or your shell
-  history). Store it once:
-  ```bash
-  # Prompts for the key; paste it in. The input stays hidden and out of your shell history.
-  # (Add -U to update an existing entry.)
-  security add-generic-password -a "$USER" -s minimax-api-key -w
-  ```
-  Then have the tool read it from the Keychain with `--key-command`, instead of an environment
-  variable:
-  ```bash
-  minimax_agent.py --dir ./my-project --sandbox \
-    --key-command "security find-generic-password -s minimax-api-key -w" "..."
-  ```
-
 **Other providers.** Nothing here is MiniMax-specific except the defaults. Point `--base-url`
-at any Anthropic-compatible endpoint and pass `--model` accordingly; check that provider's
-docs for the exact model id.
+at any Anthropic-compatible endpoint and pass `--model` accordingly; check that provider's docs
+for the exact model id.
+
+**Key sources.** The tool looks for the key in this order: `--key-command` (a command that
+prints it), then `$MINIMAX_API_KEY`, then — on macOS — a Keychain entry named `minimax-api-key`.
+Use `--key-command` to read a differently-named Keychain entry or a password manager:
+```bash
+minimax_agent.py --dir ./my-project --sandbox \
+  --key-command "security find-generic-password -s my-other-key -w" "..."
+```
 
 </details>
 

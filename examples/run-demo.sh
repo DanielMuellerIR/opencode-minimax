@@ -4,8 +4,9 @@
 # It copies the tiny demo project to a throwaway directory (your repo stays untouched),
 # runs the agent confined to that directory, and shows the before/after.
 #
-# Requires: opencode on PATH, and an API key in MINIMAX_API_KEY.
-#   export MINIMAX_API_KEY=...   # then: examples/run-demo.sh
+# Requires: opencode on PATH, and a MiniMax API key. Set $MINIMAX_API_KEY, or (macOS) store it
+# once in the Keychain and the tool finds it automatically:
+#   security add-generic-password -a "$USER" -s minimax-api-key -w
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"

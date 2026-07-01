@@ -3,7 +3,8 @@
 # cannot change your working tree, whatever it does.
 #
 # Usage:  examples/review-repo.sh /path/to/your/repo
-# Requires: opencode on PATH, MINIMAX_API_KEY set.
+# Requires: opencode on PATH; a MiniMax API key via $MINIMAX_API_KEY or the macOS Keychain
+# (store it with: security add-generic-password -a "$USER" -s minimax-api-key -w).
 set -euo pipefail
 
 repo="${1:?usage: review-repo.sh /path/to/your/repo}"

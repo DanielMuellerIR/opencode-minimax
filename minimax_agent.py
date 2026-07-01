@@ -37,6 +37,7 @@ DEFAULT_MAX_OUTPUT = 16_384
 DEFAULT_TIMEOUT = 300
 DEFAULT_RETRIES = 1
 DEFAULT_SYSTEM_PROMPT = os.path.join(_HERE, "system-prompt.md")
+DEFAULT_KEYCHAIN_SERVICE = "minimax-api-key"  # macOS Keychain fallback (see get_api_key)
 
 
 def log(msg):
@@ -44,17 +45,32 @@ def log(msg):
 
 
 def get_api_key(key_command):
-    """Return the API key from --key-command output, else the MINIMAX_API_KEY env var.
+    """Return the API key, trying three sources in order:
 
-    A key command keeps the secret out of your shell history and process arguments
-    (e.g. read it from a password manager / OS keychain)."""
+    1. `--key-command` output (a command that prints the key — keeps the secret out of your
+       shell history and process arguments, e.g. reading it from a password manager);
+    2. the `MINIMAX_API_KEY` environment variable;
+    3. on macOS, a Keychain generic-password entry named `minimax-api-key` (create it once
+       with: `security add-generic-password -a "$USER" -s minimax-api-key -w`).
+    """
     if key_command:
         r = subprocess.run(key_command, shell=True, capture_output=True, text=True)
         key = (r.stdout or "").strip()
         if key:
             return key
-        log("key-command produced no output; falling back to MINIMAX_API_KEY")
-    return (os.environ.get("MINIMAX_API_KEY") or "").strip() or None
+        log("key-command produced no output; falling back to MINIMAX_API_KEY / Keychain")
+    env = (os.environ.get("MINIMAX_API_KEY") or "").strip()
+    if env:
+        return env
+    if sys.platform == "darwin":
+        r = subprocess.run(
+            ["security", "find-generic-password", "-s", DEFAULT_KEYCHAIN_SERVICE, "-w"],
+            capture_output=True, text=True)
+        key = (r.stdout or "").strip()
+        if key:
+            log("using API key from the macOS Keychain (service '%s')" % DEFAULT_KEYCHAIN_SERVICE)
+            return key
+    return None
 
 
 def build_seatbelt_profile(write_dirs):
@@ -207,7 +223,8 @@ def main(argv=None):
         ap.error("--dir does not exist: %s" % args.dir)
     key = get_api_key(args.key_command)
     if not key:
-        log("ERROR: no API key. Set MINIMAX_API_KEY or pass --key-command.")
+        log("ERROR: no API key. Set MINIMAX_API_KEY, pass --key-command, or (macOS) store it "
+            "in the Keychain: security add-generic-password -a \"$USER\" -s minimax-api-key -w")
         return 2
     return run(task, args.dir, key,
                model=args.model, base_url=args.base_url, context=args.context,

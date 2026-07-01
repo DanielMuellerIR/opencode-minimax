@@ -3,7 +3,8 @@
 # before merging anything into your real branch.
 #
 # Usage:  examples/fix-in-sandbox.sh /path/to/your/repo "the task for the agent"
-# Requires: opencode on PATH, MINIMAX_API_KEY set. macOS (the --sandbox flag).
+# Requires: opencode on PATH; macOS (the --sandbox flag); a MiniMax API key via
+# $MINIMAX_API_KEY or the macOS Keychain (security add-generic-password -a "$USER" -s minimax-api-key -w).
 set -euo pipefail
 
 repo="${1:?usage: fix-in-sandbox.sh /path/to/your/repo \"the task\"}"
