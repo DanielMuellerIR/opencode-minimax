@@ -27,10 +27,13 @@ You need three things:
    [MiniMax platform](https://www.minimax.io), then **generate an API key from your
    subscription** — that key is what this tool uses. Make it available in your terminal:
    ```bash
+   # Run this in your terminal. It sets a temporary environment variable that lasts only for
+   # the current terminal window — open a new one and it's gone.
    export MINIMAX_API_KEY=your-key-here
    ```
-   (Add that line to your shell profile so it persists. You can also read the key from a
-   password manager instead — see **Keeping the key safe** in the collapsible sections below.)
+   To avoid re-typing it each time, either add that line to your shell profile (e.g.
+   `~/.zshrc`), or — more securely — store the key in the macOS Keychain. Both are explained
+   under **Keeping the key safe** in the collapsible sections below.
 
 Then get this repository:
 
@@ -184,14 +187,24 @@ The whole thing is about 200 lines of Python you can read in one sitting.
 
 <br>
 
-**Keeping the key safe.** Instead of an environment variable you can hand the tool a command
-that prints the key, so the secret never sits in your shell history:
+**Keeping the key safe.** The `export` in the setup sets the key only for the current terminal
+session. For a permanent setup you have two options:
 
-```bash
-# macOS Keychain example:
-minimax_agent.py --dir ./my-project \
-  --key-command "security find-generic-password -s minimax-api-key -w" "..."
-```
+- **Shell profile** — put the `export MINIMAX_API_KEY=...` line in `~/.zshrc` (or your shell's
+  profile) so every new terminal has it. Simple, but the key then sits in a plain-text file.
+- **macOS Keychain** (more secure — the key stays encrypted, never in a file or your shell
+  history). Store it once:
+  ```bash
+  # Prompts for the key; paste it in. The input stays hidden and out of your shell history.
+  # (Add -U to update an existing entry.)
+  security add-generic-password -a "$USER" -s minimax-api-key -w
+  ```
+  Then have the tool read it from the Keychain with `--key-command`, instead of an environment
+  variable:
+  ```bash
+  minimax_agent.py --dir ./my-project --sandbox \
+    --key-command "security find-generic-password -s minimax-api-key -w" "..."
+  ```
 
 **Other providers.** Nothing here is MiniMax-specific except the defaults. Point `--base-url`
 at any Anthropic-compatible endpoint and pass `--model` accordingly; check that provider's

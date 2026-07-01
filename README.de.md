@@ -30,11 +30,13 @@ Du brauchst drei Dinge:
    API-Key generieren** — dieser Key ist der, den das Tool verwendet. Im Terminal verfügbar
    machen:
    ```bash
+   # Im Terminal ausführen. Das setzt eine temporäre Umgebungsvariable, die nur für das
+   # aktuelle Terminal-Fenster gilt — neues Fenster, und sie ist weg.
    export MINIMAX_API_KEY=dein-key-hier
    ```
-   (Diese Zeile ins Shell-Profil aufnehmen, damit sie bestehen bleibt. Man kann den Key auch
-   aus einem Passwort-Manager lesen — siehe **Den Key sicher halten** in den einklappbaren
-   Abschnitten weiter unten.)
+   Damit du ihn nicht jedes Mal neu eingeben musst: entweder diese Zeile ins Shell-Profil
+   aufnehmen (z. B. `~/.zshrc`), oder — sicherer — den Key im macOS-Schlüsselbund ablegen.
+   Beides ist unter **Den Key sicher halten** in den einklappbaren Abschnitten unten erklärt.
 
 Dann dieses Repository holen:
 
@@ -193,14 +195,25 @@ Das Ganze sind rund 200 Zeilen Python, die man in einem Rutsch liest.
 
 <br>
 
-**Den Key sicher halten.** Statt einer Umgebungsvariablen kann man dem Tool ein Kommando
-übergeben, das den Key ausgibt — so landet das Geheimnis nie in der Shell-History:
+**Den Key sicher halten.** Das `export` im Setup setzt den Key nur für die aktuelle
+Terminal-Sitzung. Für eine dauerhafte Einrichtung gibt es zwei Wege:
 
-```bash
-# Beispiel macOS-Schlüsselbund:
-minimax_agent.py --dir ./mein-projekt \
-  --key-command "security find-generic-password -s minimax-api-key -w" "..."
-```
+- **Shell-Profil** — die Zeile `export MINIMAX_API_KEY=...` in `~/.zshrc` (bzw. das Profil
+  deiner Shell) legen, dann hat jedes neue Terminal den Key. Einfach, aber der Key steht dann
+  im Klartext in einer Datei.
+- **macOS-Schlüsselbund** (sicherer — der Key bleibt verschlüsselt, nie in einer Datei oder
+  der Shell-History). Einmal ablegen:
+  ```bash
+  # Fragt nach dem Key; einfügen — die Eingabe bleibt verborgen und aus der Shell-History raus.
+  # (-U anhängen, um einen bestehenden Eintrag zu aktualisieren.)
+  security add-generic-password -a "$USER" -s minimax-api-key -w
+  ```
+  Dann liest das Tool den Key mit `--key-command` aus dem Schlüsselbund, statt aus einer
+  Umgebungsvariablen:
+  ```bash
+  minimax_agent.py --dir ./mein-projekt --sandbox \
+    --key-command "security find-generic-password -s minimax-api-key -w" "..."
+  ```
 
 **Andere Provider.** Außer den Defaults ist hier nichts MiniMax-spezifisch. `--base-url` auf
 einen beliebigen Anthropic-kompatiblen Endpunkt zeigen und `--model` entsprechend setzen; die
