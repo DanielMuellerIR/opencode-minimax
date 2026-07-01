@@ -21,8 +21,14 @@ Du brauchst drei Dinge:
    opencode --version
    ```
 2. **Python 3.8+** (nur Standardbibliothek — nichts zu installieren).
-3. **Einen MiniMax-API-Key** — auf der [MiniMax](https://www.minimax.io)-Plattform erstellen
-   und im Terminal verfügbar machen:
+3. **Einen MiniMax-API-Key aus einem Token Plan.** Am günstigsten nutzt man MiniMax über ein
+   **Token-Plan**-Abo — es liefert ein großes monatliches Token-Kontingent statt
+   nutzungsabhängiger Abrechnung. Der **Plus**-Plan (zum jetzigen Stand rund 20 US$/Monat)
+   enthält bereits ein sehr üppiges Kontingent in der Größenordnung von 1,7 Milliarden Tokens,
+   was für delegierte Coding-Arbeit weit reicht. Auf der
+   [MiniMax-Plattform](https://www.minimax.io) einen Plan wählen, dann **aus dem Abo einen
+   API-Key generieren** — dieser Key ist der, den das Tool verwendet. Im Terminal verfügbar
+   machen:
    ```bash
    export MINIMAX_API_KEY=dein-key-hier
    ```
