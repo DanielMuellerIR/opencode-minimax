@@ -27,7 +27,8 @@ Du brauchst drei Dinge:
    export MINIMAX_API_KEY=dein-key-hier
    ```
    (Diese Zeile ins Shell-Profil aufnehmen, damit sie bestehen bleibt. Man kann den Key auch
-   aus einem Passwort-Manager lesen — siehe [Den Key sicher halten](#den-key-sicher-halten).)
+   aus einem Passwort-Manager lesen — siehe **Den Key sicher halten** in den einklappbaren
+   Abschnitten weiter unten.)
 
 Dann dieses Repository holen:
 

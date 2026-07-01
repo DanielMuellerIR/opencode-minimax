@@ -24,8 +24,8 @@ You need three things:
    ```bash
    export MINIMAX_API_KEY=your-key-here
    ```
-   (Add that line to your shell profile so it persists. There's also a way to read the key
-   from a password manager instead — see [Keeping the key safe](#keeping-the-key-safe).)
+   (Add that line to your shell profile so it persists. You can also read the key from a
+   password manager instead — see **Keeping the key safe** in the collapsible sections below.)
 
 Then get this repository:
 
