@@ -100,6 +100,41 @@ The single biggest thing that makes delegation work well is **describing the tas
 minimax_agent.py --dir ./my-project --sandbox < examples/briefs/fix-failing-test.md
 ```
 
+## The hands-off way: drive it from your AI assistant
+
+The most comfortable way to use this is not to type the command yourself at all, but to let
+your main AI coding assistant do it. If your assistant can run shell commands — Claude Code,
+Claude Desktop with file access, Cursor, Codex, and similar — then your capable planning model
+does the thinking and orchestration and hands the routine implementation to MiniMax through
+this tool. You just describe what you want in plain language:
+
+> "Implement the CSV export in `exporter.py`. Delegate the implementation to MiniMax, then
+> show me the diff."
+
+To make your assistant do this on its own, paste an instruction like the following into its
+project instructions — `CLAUDE.md`, `AGENTS.md`, a system prompt, or a custom-instructions
+field — and adjust the path:
+
+```markdown
+## Delegating implementation to MiniMax
+For well-specified implementation work (new code, refactors, mechanical edits, bulk changes),
+delegate to MiniMax instead of writing it yourself, to save frontier tokens:
+
+1. Write a precise brief: goal, files, success criterion, style, and what not to touch.
+2. Make a throwaway git worktree of the target repo:  git worktree add -f <wt> HEAD
+3. Run:  python3 /path/to/opencode-minimax/minimax_agent.py --dir <wt> --sandbox "<brief>"
+   (or pipe the brief in via stdin).
+4. Read the resulting  git -C <wt> diff , check correctness, scope and style, then merge.
+   Never blind-merge machine output.
+5. Remove the worktree when done.
+
+Keep planning, correctness-critical, and security-sensitive work for yourself.
+```
+
+After that, "do X and delegate the implementation to MiniMax" is enough — your assistant runs
+the tool, reviews the diff, and reports back. This snippet is just a portable version of the
+same rule an experienced user keeps in their assistant's config.
+
 ## Staying safe
 
 The assistant edits files on its own, so keep it boxed in — the examples above already do

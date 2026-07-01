@@ -105,6 +105,41 @@ hineinpipen:
 minimax_agent.py --dir ./mein-projekt --sandbox < examples/briefs/fix-failing-test.md
 ```
 
+## Der bequeme Weg: aus deinem KI-Assistenten heraus
+
+Am angenehmsten nutzt man das, indem man den Befehl gar nicht selbst tippt, sondern den
+eigenen KI-Coding-Assistenten machen lässt. Kann dein Assistent Shell-Befehle ausführen —
+Claude Code, Claude Desktop mit Dateizugriff, Cursor, Codex und Ähnliches — dann übernimmt dein
+starkes Planungsmodell das Denken und die Orchestrierung und reicht die Routine-Implementierung
+über dieses Tool an MiniMax weiter. Du beschreibst nur in normaler Sprache, was du willst:
+
+> „Implementiere den CSV-Export in `exporter.py`. Delegier die Implementierung an MiniMax und
+> zeig mir dann den Diff."
+
+Damit dein Assistent das von selbst tut, füge eine Anweisung wie die folgende in seine
+Projekt-Konfiguration ein — `CLAUDE.md`, `AGENTS.md`, einen System-Prompt oder ein
+Custom-Instructions-Feld — und passe den Pfad an:
+
+```markdown
+## Implementierung an MiniMax delegieren
+Für gut spezifizierte Implementierungsarbeit (neuer Code, Refactorings, mechanische Änderungen,
+Massenänderungen) an MiniMax delegieren statt selbst zu schreiben, um Frontier-Tokens zu sparen:
+
+1. Präzises Briefing schreiben: Ziel, Dateien, Erfolgskriterium, Stil, was nicht anzufassen ist.
+2. Wegwerf-Worktree des Ziel-Repos anlegen:  git worktree add -f <wt> HEAD
+3. Ausführen:  python3 /pfad/zu/opencode-minimax/minimax_agent.py --dir <wt> --sandbox "<Briefing>"
+   (oder das Briefing über stdin hineingeben).
+4. Den resultierenden  git -C <wt> diff  lesen, Korrektheit/Umfang/Stil prüfen, dann übernehmen.
+   Maschinen-Output nie blind mergen.
+5. Worktree danach entfernen.
+
+Planung, korrektheits- und sicherheitskritische Arbeit selbst behalten.
+```
+
+Danach genügt „mach X und delegier die Implementierung an MiniMax" — dein Assistent ruft das
+Tool auf, prüft den Diff und meldet zurück. Dieses Snippet ist nur eine portable Fassung
+derselben Regel, die ein erfahrener Nutzer in der Konfiguration seines Assistenten stehen hat.
+
 ## Sicher bleiben
 
 Der Assistent editiert selbstständig Dateien, also sperr ihn ein — die Beispiele oben tun das
