@@ -165,6 +165,8 @@ Planung, korrektheits- und sicherheitskritische Arbeit selbst behalten.
 Danach genügt „mach X und delegier die Implementierung an MiniMax" — dein Assistent ruft das
 Tool auf, prüft den Diff und meldet zurück. Dieses Snippet ist nur eine portable Fassung
 derselben Regel, die ein erfahrener Nutzer in der Konfiguration seines Assistenten stehen hat.
+Es liegt auch als fertig einfügbare Datei bereit:
+[`examples/assistant-instructions.md`](examples/assistant-instructions.md).
 
 ## Sicher bleiben
 

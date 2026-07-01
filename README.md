@@ -159,7 +159,8 @@ Keep planning, correctness-critical, and security-sensitive work for yourself.
 
 After that, "do X and delegate the implementation to MiniMax" is enough — your assistant runs
 the tool, reviews the diff, and reports back. This snippet is just a portable version of the
-same rule an experienced user keeps in their assistant's config.
+same rule an experienced user keeps in their assistant's config. It is also available as a
+ready-to-paste file: [`examples/assistant-instructions.md`](examples/assistant-instructions.md).
 
 ## Staying safe
 
