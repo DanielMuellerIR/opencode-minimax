@@ -113,7 +113,12 @@ def run_with_timeout(cmd, env, timeout, retries):
                 os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
             except (ProcessLookupError, PermissionError):
                 pass
-            proc.wait()
+            try:
+                # SIGKILL cannot be caught, but a child stuck in uninterruptible I/O
+                # may take a moment to die — don't hang the retry loop waiting for it.
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                log("process group still not gone after SIGKILL; continuing anyway")
             log("attempt %d/%d aborted after %ds%s"
                 % (i, attempts, timeout, " — retrying" if i < attempts else " — giving up"))
     return 124
@@ -203,12 +208,14 @@ def main(argv=None):
                          "such provider)")
     ap.add_argument("--context", type=int, default=DEFAULT_CONTEXT,
                     help="context window to declare (default %d)" % DEFAULT_CONTEXT)
-    ap.add_argument("--max-output", type=int, default=DEFAULT_MAX_OUTPUT)
+    ap.add_argument("--max-output", type=int, default=DEFAULT_MAX_OUTPUT,
+                    help="max output tokens to declare (default %d)" % DEFAULT_MAX_OUTPUT)
     ap.add_argument("--system-prompt", default=DEFAULT_SYSTEM_PROMPT,
                     help="instructions file injected into every run (default: bundled)")
     ap.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT,
                     help="seconds before a stalled run is killed and retried (0 = off)")
-    ap.add_argument("--retries", type=int, default=DEFAULT_RETRIES)
+    ap.add_argument("--retries", type=int, default=DEFAULT_RETRIES,
+                    help="restarts after a stalled run (default %d)" % DEFAULT_RETRIES)
     ap.add_argument("--sandbox", action="store_true",
                     help="macOS only: confine writes/deletes to --dir at the OS level")
     ap.add_argument("--key-command",
