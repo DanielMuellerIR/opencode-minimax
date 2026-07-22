@@ -15,7 +15,8 @@ und behältst es oder verwirfst es.
 
 1. [OpenCode](https://opencode.ai) installieren und einen MiniMax-API-Key holen — ein
    **Token-Plan**-Abo (der **Plus**-Plan für ~20 US$ enthält bereits ~1,7 Mrd. Tokens).
-2. **Key einmal ablegen** im macOS-Schlüsselbund (bleibt verschlüsselt, nie in einer Datei):
+2. **Key einmal ablegen** im macOS-Schlüsselbund (verschlüsselte dauerhafte Ablage; Hinweis
+   zur temporären Laufzeitdatei weiter unten):
    ```bash
    security add-generic-password -a "$USER" -s minimax-api-key -w   # Key einfügen; Eingabe bleibt verborgen
    ```
@@ -49,13 +50,21 @@ Du brauchst drei Dinge:
    [MiniMax-Plattform](https://www.minimax.io) einen Plan wählen, dann aus dem Abo einen
    API-Key generieren.
 
-   **Sicher ablegen (empfohlen, macOS).** Den Key im Schlüsselbund halten — er bleibt
-   verschlüsselt und liegt nie in einer Datei oder deiner Shell-History:
+   **Sicher ablegen (empfohlen, macOS).** Die dauerhafte Kopie im Schlüsselbund halten —
+   dort bleibt sie verschlüsselt und aus deiner Shell-History heraus:
    ```bash
    # Fragt nach dem Key; einfügen — die Eingabe bleibt verborgen. (-U aktualisiert einen bestehenden Eintrag.)
    security add-generic-password -a "$USER" -s minimax-api-key -w
    ```
    Das war's — das Tool und die Beispielskripte lesen den Key automatisch aus dem Schlüsselbund.
+
+   **Exposition während des Laufs:** OpenCode benötigt das Credential in seiner erzeugten
+   Konfiguration. Der Wrapper schreibt es deshalb für jeden Lauf im Klartext in eine
+   `config.json` mit Modus `0600`, innerhalb eines privaten System-Temp-Verzeichnisses mit
+   Modus `0700` und Namen `opencode-minimax-*`. Bei normalem Ende wird dieses Verzeichnis
+   gelöscht. Ein harter Abbruch, `SIGKILL` oder Stromausfall kann die temporäre Kopie
+   zurücklassen; nach einem solchen Abbruch das System-Temp-Verzeichnis prüfen und verwaiste
+   `opencode-minimax-*`-Verzeichnisse entfernen.
 
    **Oder schnell:** stattdessen eine Umgebungsvariable für das aktuelle Terminal setzen:
    ```bash
@@ -153,8 +162,12 @@ Massenänderungen) an MiniMax delegieren statt selbst zu schreiben, um Frontier-
 
 1. Präzises Briefing schreiben: Ziel, Dateien, Erfolgskriterium, Stil, was nicht anzufassen ist.
 2. Wegwerf-Worktree des Ziel-Repos anlegen:  git worktree add -f <wt> HEAD
-3. Ausführen:  python3 /pfad/zu/opencode-minimax/minimax_agent.py --dir <wt> --sandbox "<Briefing>"
-   (oder das Briefing über stdin hineingeben).
+3. Passend zur Plattform ausführen (oder das Briefing über stdin hineingeben):
+   - macOS:  python3 /pfad/zu/opencode-minimax/minimax_agent.py --dir <wt> --sandbox "<Briefing>"
+   - Linux/Nicht-macOS: denselben Befehl ohne --sandbox im Wegwerf-Worktree ausführen.
+     Falls ein freigegebener bubblewrap-/firejail-Wrapper vorhanden ist, ihn für die
+     OS-Einsperrung nutzen. Der Worktree schützt den Original-Checkout, ist aber keine
+     OS-Sandbox.
 4. Den resultierenden  git -C <wt> diff  lesen, Korrektheit/Umfang/Stil prüfen, dann übernehmen.
    Maschinen-Output nie blind mergen.
 5. Worktree danach entfernen.
@@ -225,13 +238,15 @@ Das Ganze sind rund 200 Zeilen Python, die man in einem Rutsch liest.
 einen beliebigen Anthropic-kompatiblen Endpunkt zeigen und `--model` entsprechend setzen; die
 genaue Modell-ID steht in der Doku des jeweiligen Providers.
 
-**Key-Quellen.** Das Tool sucht den Key in dieser Reihenfolge: `--key-command` (ein Kommando,
-das ihn ausgibt), dann `$MINIMAX_API_KEY`, dann — auf macOS — ein Schlüsselbund-Eintrag namens
-`minimax-api-key`. Mit `--key-command` liest man einen anders benannten Eintrag oder einen
-Passwort-Manager:
+**Key-Quellen.** Für den Standard-MiniMax-Endpunkt sucht das Tool in dieser Reihenfolge:
+`--key-command` (ein Kommando, das den Key ausgibt), dann `$MINIMAX_API_KEY`, dann — auf
+macOS — den Eintrag `minimax-api-key` des aktuellen Kontos. Ein eigener `--base-url` verlangt
+`--key-command`; MiniMax-Umgebungsvariable und -Schlüsselbund-Fallback werden bewusst ignoriert,
+damit ihr Credential nicht an einen anderen Provider gelangen kann. Dafür einen
+providerspezifischen Eintrag oder Passwort-Manager-Befehl verwenden:
 ```bash
 minimax_agent.py --dir ./mein-projekt --sandbox \
-  --key-command "security find-generic-password -s mein-anderer-key -w" "..."
+  --key-command "security find-generic-password -a \"$USER\" -s mein-anderer-key -w" "..."
 ```
 
 </details>

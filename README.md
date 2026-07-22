@@ -14,7 +14,8 @@ its own work. You review the result and keep it or throw it away.
 
 1. Install [OpenCode](https://opencode.ai) and get a MiniMax API key — a **Token Plan**
    subscription (the ~US$20 **Plus** plan already includes ~1.7 billion tokens).
-2. **Store the key once** in your macOS Keychain (it stays encrypted, never in a file):
+2. **Store the key once** in your macOS Keychain (encrypted persistent storage; see the
+   temporary runtime-file note below):
    ```bash
    security add-generic-password -a "$USER" -s minimax-api-key -w   # paste the key; input stays hidden
    ```
@@ -45,13 +46,20 @@ You need three things:
    ~1.7 billion tokens, plenty for delegated coding. Pick a plan on the
    [MiniMax platform](https://www.minimax.io), then generate an API key from your subscription.
 
-   **Store it securely (recommended, macOS).** Keep the key in your Keychain — it stays
-   encrypted and never sits in a file or your shell history:
+   **Store it securely (recommended, macOS).** Keep the persistent copy in your Keychain —
+   it stays encrypted at rest and out of your shell history:
    ```bash
    # Prompts for the key; paste it in — the input stays hidden. (-U updates an existing entry.)
    security add-generic-password -a "$USER" -s minimax-api-key -w
    ```
    That's all — the tool and the example scripts read the key from the Keychain automatically.
+
+   **Runtime exposure:** OpenCode needs the credential in its generated configuration. During
+   each run, this wrapper therefore writes it in clear text to a mode-`0600` `config.json`
+   inside a private mode-`0700` system-temp directory named `opencode-minimax-*`. Normal exits
+   remove that directory. A hard crash, `SIGKILL`, or power loss can leave the temporary copy
+   behind; inspect the system temp directory and remove stale `opencode-minimax-*` directories
+   if a run was terminated that way.
 
    **Or, the quick way:** set an environment variable for the current terminal instead:
    ```bash
@@ -148,8 +156,11 @@ delegate to MiniMax instead of writing it yourself, to save frontier tokens:
 
 1. Write a precise brief: goal, files, success criterion, style, and what not to touch.
 2. Make a throwaway git worktree of the target repo:  git worktree add -f <wt> HEAD
-3. Run:  python3 /path/to/opencode-minimax/minimax_agent.py --dir <wt> --sandbox "<brief>"
-   (or pipe the brief in via stdin).
+3. Run according to the host platform (or pipe the brief in via stdin):
+   - macOS:  python3 /path/to/opencode-minimax/minimax_agent.py --dir <wt> --sandbox "<brief>"
+   - Linux/non-macOS: run the same command without --sandbox inside the throwaway worktree.
+     If an approved bubblewrap/firejail wrapper exists, use it for OS-level confinement.
+     The worktree protects the original checkout but is not an OS sandbox.
 4. Read the resulting  git -C <wt> diff , check correctness, scope and style, then merge.
    Never blind-merge machine output.
 5. Remove the worktree when done.
@@ -215,12 +226,15 @@ The whole thing is about 200 lines of Python you can read in one sitting.
 at any Anthropic-compatible endpoint and pass `--model` accordingly; check that provider's docs
 for the exact model id.
 
-**Key sources.** The tool looks for the key in this order: `--key-command` (a command that
-prints it), then `$MINIMAX_API_KEY`, then — on macOS — a Keychain entry named `minimax-api-key`.
-Use `--key-command` to read a differently-named Keychain entry or a password manager:
+**Key sources.** For the default MiniMax endpoint, the tool looks for the key in this order:
+`--key-command` (a command that prints it), then `$MINIMAX_API_KEY`, then — on macOS — the
+current account's Keychain entry named `minimax-api-key`. A custom `--base-url` requires
+`--key-command`; the MiniMax environment variable and Keychain fallback are deliberately
+ignored so their credential cannot leak to another provider. Use a provider-specific entry or
+password manager command:
 ```bash
 minimax_agent.py --dir ./my-project --sandbox \
-  --key-command "security find-generic-password -s my-other-key -w" "..."
+  --key-command "security find-generic-password -a \"$USER\" -s my-other-key -w" "..."
 ```
 
 </details>

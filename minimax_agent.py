@@ -8,9 +8,10 @@ Why this exists: OpenCode already supports custom providers, but pointing it at 
 agentically has four non-obvious traps that make it look like "the model can't write
 files" when the real cause is the harness. This script bakes in the fixes. See README.md.
 
-API key: set the MINIMAX_API_KEY environment variable, or pass
+API key for MiniMax: set the MINIMAX_API_KEY environment variable, or pass
     --key-command "<shell command that prints the key>"
-(e.g. macOS Keychain: --key-command "security find-generic-password -s minimax-api-key -w").
+For a custom --base-url, --key-command is required so a MiniMax credential is never
+implicitly sent to another provider.
 
 Quick start:
     export MINIMAX_API_KEY=...
@@ -44,31 +45,60 @@ def log(msg):
     print(msg, file=sys.stderr, flush=True)
 
 
-def get_api_key(key_command):
+def uses_default_base_url(base_url):
+    """Treat an optional trailing slash as the same MiniMax endpoint."""
+    return base_url.rstrip("/") == DEFAULT_BASE_URL.rstrip("/")
+
+
+def get_keychain_account():
+    """Return the effective login account used for the Keychain entry."""
+    try:
+        import pwd
+        return pwd.getpwuid(os.geteuid()).pw_name
+    except (ImportError, KeyError):
+        return (os.environ.get("USER") or "").strip()
+
+
+def get_api_key(key_command, base_url=DEFAULT_BASE_URL):
     """Return the API key, trying three sources in order:
 
     1. `--key-command` output (a command that prints the key — keeps the secret out of your
        shell history and process arguments, e.g. reading it from a password manager);
-    2. the `MINIMAX_API_KEY` environment variable;
-    3. on macOS, a Keychain generic-password entry named `minimax-api-key` (create it once
-       with: `security add-generic-password -a "$USER" -s minimax-api-key -w`).
+    2. for the default MiniMax endpoint only, the `MINIMAX_API_KEY` environment variable;
+    3. for the default endpoint on macOS, the current account's Keychain generic-password
+       entry named `minimax-api-key` (create it once with:
+       `security add-generic-password -a "$USER" -s minimax-api-key -w`).
+
+    A custom endpoint deliberately accepts only `--key-command`: provider-specific
+    credentials must be selected explicitly rather than inheriting a MiniMax key.
     """
     if key_command:
         r = subprocess.run(key_command, shell=True, capture_output=True, text=True)
         key = (r.stdout or "").strip()
         if key:
             return key
-        log("key-command produced no output; falling back to MINIMAX_API_KEY / Keychain")
+        if uses_default_base_url(base_url):
+            log("key-command produced no output; falling back to MINIMAX_API_KEY / Keychain")
+        else:
+            log("key-command produced no output; custom endpoints have no implicit key fallback")
+            return None
+    if not uses_default_base_url(base_url):
+        return None
     env = (os.environ.get("MINIMAX_API_KEY") or "").strip()
     if env:
         return env
     if sys.platform == "darwin":
+        account = get_keychain_account()
+        if not account:
+            return None
         r = subprocess.run(
-            ["security", "find-generic-password", "-s", DEFAULT_KEYCHAIN_SERVICE, "-w"],
+            ["security", "find-generic-password", "-a", account,
+             "-s", DEFAULT_KEYCHAIN_SERVICE, "-w"],
             capture_output=True, text=True)
         key = (r.stdout or "").strip()
         if key:
-            log("using API key from the macOS Keychain (service '%s')" % DEFAULT_KEYCHAIN_SERVICE)
+            log("using API key from the macOS Keychain (account '%s', service '%s')"
+                % (account, DEFAULT_KEYCHAIN_SERVICE))
             return key
     return None
 
@@ -174,6 +204,10 @@ def run(task, work_dir, key, *, model, base_url, context, max_output,
                    XDG_DATA_HOME=os.path.join(home, "data"),
                    XDG_CACHE_HOME=os.path.join(home, "cache"),
                    XDG_STATE_HOME=os.path.join(home, "state"))
+        if not uses_default_base_url(base_url):
+            # Even when the custom provider uses its explicit key-command value,
+            # do not expose an unrelated MiniMax key to OpenCode or its tools.
+            env.pop("MINIMAX_API_KEY", None)
         cmd = ["opencode", "run", "-m", "minimax/" + model, "--dir", work_dir]
         if variant:
             cmd += ["--variant", variant]
@@ -219,7 +253,8 @@ def main(argv=None):
     ap.add_argument("--sandbox", action="store_true",
                     help="macOS only: confine writes/deletes to --dir at the OS level")
     ap.add_argument("--key-command",
-                    help="shell command that prints the API key (else $MINIMAX_API_KEY)")
+                    help="shell command that prints the API key (required for custom "
+                         "--base-url; default MiniMax endpoint also tries $MINIMAX_API_KEY)")
     ap.add_argument("--variant", help="OpenCode agent variant (optional)")
     args = ap.parse_args(argv)
 
@@ -228,10 +263,15 @@ def main(argv=None):
         ap.error("no task given (pass it as an argument or via stdin)")
     if not os.path.isdir(args.dir):
         ap.error("--dir does not exist: %s" % args.dir)
-    key = get_api_key(args.key_command)
+    key = get_api_key(args.key_command, args.base_url)
     if not key:
-        log("ERROR: no API key. Set MINIMAX_API_KEY, pass --key-command, or (macOS) store it "
-            "in the Keychain: security add-generic-password -a \"$USER\" -s minimax-api-key -w")
+        if uses_default_base_url(args.base_url):
+            log("ERROR: no API key. Set MINIMAX_API_KEY, pass --key-command, or (macOS) "
+                "store it in the Keychain: security add-generic-password -a \"$USER\" "
+                "-s minimax-api-key -w")
+        else:
+            log("ERROR: a custom --base-url requires an explicit provider credential via "
+                "--key-command; MINIMAX_API_KEY and the MiniMax Keychain entry are ignored")
         return 2
     return run(task, args.dir, key,
                model=args.model, base_url=args.base_url, context=args.context,
