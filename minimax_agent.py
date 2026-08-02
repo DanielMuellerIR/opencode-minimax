@@ -29,6 +29,8 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_MODEL = "MiniMax-M3"
@@ -123,34 +125,141 @@ def build_seatbelt_profile(write_dirs):
     )
 
 
+def install_termination_handlers():
+    """Let SIGTERM/SIGHUP unwind the program instead of ending it on the spot.
+
+    Python's default action for those signals stops the process immediately: no `finally`
+    runs, so the temp home with the API key in clear text stays on disk and OpenCode keeps
+    working in the background. Raising SystemExit from the handler unwinds through the
+    cleanup paths instead. SIGINT (Ctrl-C) already raises KeyboardInterrupt and unwinds
+    the same way, so it needs no handler."""
+    def bail_out(signum, _frame):
+        raise SystemExit(128 + signum)  # shell convention for "killed by signal N"
+
+    for name in ("SIGTERM", "SIGHUP"):
+        sig = getattr(signal, name, None)
+        if sig is None:
+            continue                       # not available on this platform
+        try:
+            signal.signal(sig, bail_out)
+        except (OSError, ValueError):
+            pass                           # e.g. imported and called off the main thread
+
+
+def kill_process_group(proc, grace=5):
+    """Kill one attempt's whole process group and wait for it to be gone.
+
+    start_new_session (see run_with_timeout) puts OpenCode and its children (bun) in their
+    own process group, so a signal aimed at this wrapper never reaches them — they have to
+    be shot down explicitly, or the model keeps editing files after the abort. SIGTERM
+    first so OpenCode can shut down cleanly; whatever survives the grace period gets
+    SIGKILL."""
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(os.getpgid(proc.pid), sig)
+        except (ProcessLookupError, PermissionError, OSError):
+            return                         # already gone (or never ours to signal)
+        try:
+            proc.wait(timeout=grace)
+            return
+        except subprocess.TimeoutExpired:
+            # SIGTERM ignored, or a child stuck in uninterruptible I/O — escalate once.
+            continue
+    log("process group still not gone after SIGKILL; continuing anyway")
+
+
+def _forward(stream, sink, seen):
+    """Pass one output stream of the child through unchanged and note when it last spoke.
+
+    Runs in its own thread. `seen` is the shared progress record read by _one_attempt."""
+    while True:
+        try:
+            chunk = stream.read1(65536)    # returns as soon as anything is there
+        except (OSError, ValueError):
+            return                         # pipe closed while we were reading
+        if not chunk:
+            return                         # end of output: the child is done writing
+        seen["at"] = time.monotonic()
+        seen["any"] = True
+        try:
+            sink.write(chunk)
+            sink.flush()
+        except (OSError, ValueError):
+            return
+
+
+def _one_attempt(cmd, env, timeout):
+    """Run OpenCode once. Returns (exit code, "did it produce any output?").
+
+    The exit code is None when the run was killed for staying silent for `timeout`
+    seconds. Output is piped through this process so silence is measurable at all;
+    it is written on to our own stdout/stderr as it arrives."""
+    proc = subprocess.Popen(cmd, env=env, start_new_session=True,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    seen = {"at": time.monotonic(), "any": False}
+    pumps = [threading.Thread(target=_forward, args=(src, sink, seen), daemon=True)
+             for src, sink in ((proc.stdout, sys.stdout.buffer),
+                               (proc.stderr, sys.stderr.buffer))]
+    for pump in pumps:
+        pump.start()
+    try:
+        while True:
+            rc = proc.poll()
+            if rc is not None:
+                return rc, seen["any"]
+            if time.monotonic() - seen["at"] >= timeout:
+                kill_process_group(proc)
+                return None, seen["any"]
+            time.sleep(0.2)
+    except BaseException:
+        # Ctrl-C, SIGTERM/SIGHUP (see install_termination_handlers) or an internal error:
+        # never leave OpenCode running behind our back.
+        kill_process_group(proc)
+        raise
+    finally:
+        for pump in pumps:
+            pump.join(timeout=5)           # let the last output through
+        for pipe in (proc.stdout, proc.stderr):
+            try:
+                pipe.close()
+            except OSError:
+                pass
+
+
 def run_with_timeout(cmd, env, timeout, retries):
-    """Run OpenCode with a timeout and retry against transient start-up stalls.
+    """Run OpenCode, watching its output so that only a stalled START gets retried.
 
     OpenCode occasionally hangs at session start (a small title/provider-init LLM call
     blocks) while the API itself is healthy. The stall happens BEFORE the first tool call,
-    i.e. before any file change, so a restart is safe. Each attempt runs in its own process
-    group (start_new_session) so the timeout also kills OpenCode's child processes (bun);
-    otherwise the model outlives the killed parent. timeout <= 0 disables timeout/retry."""
+    i.e. before any file change, so a restart is safe.
+
+    `timeout` therefore limits SILENCE, not the total runtime: a long task keeps running
+    as long as OpenCode keeps printing. Only a run that says nothing for `timeout` seconds
+    is killed — and it is restarted only if it never said anything at all. A run that had
+    already started may have changed files, so it ends with exit code 124 and no retry;
+    review the work dir before running again.
+
+    Each attempt runs in its own process group (start_new_session) so a kill also gets
+    OpenCode's child processes (bun); otherwise the model outlives the killed parent.
+    timeout <= 0 disables timeout/retry and leaves the terminal to OpenCode directly."""
     if not timeout or timeout <= 0:
-        return subprocess.run(cmd, env=env).returncode
-    attempts = retries + 1
-    for i in range(1, attempts + 1):
         proc = subprocess.Popen(cmd, env=env, start_new_session=True)
         try:
-            return proc.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            try:
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
-                pass
-            try:
-                # SIGKILL cannot be caught, but a child stuck in uninterruptible I/O
-                # may take a moment to die — don't hang the retry loop waiting for it.
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                log("process group still not gone after SIGKILL; continuing anyway")
-            log("attempt %d/%d aborted after %ds%s"
-                % (i, attempts, timeout, " — retrying" if i < attempts else " — giving up"))
+            return proc.wait()
+        except BaseException:
+            kill_process_group(proc)
+            raise
+    attempts = retries + 1
+    for i in range(1, attempts + 1):
+        rc, produced_output = _one_attempt(cmd, env, timeout)
+        if rc is not None:
+            return rc
+        if produced_output:
+            log("no output for %ds, but the run had already started — killed without a "
+                "retry (exit 124); check the work dir before starting over" % timeout)
+            return 124
+        log("attempt %d/%d aborted after %ds without any output%s"
+            % (i, attempts, timeout, " — retrying" if i < attempts else " — giving up"))
     return 124
 
 
@@ -247,9 +356,12 @@ def main(argv=None):
     ap.add_argument("--system-prompt", default=DEFAULT_SYSTEM_PROMPT,
                     help="instructions file injected into every run (default: bundled)")
     ap.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT,
-                    help="seconds before a stalled run is killed and retried (0 = off)")
+                    help="seconds of silence before a stalled run is killed; a run that "
+                         "keeps printing is never cut off (0 = off)")
     ap.add_argument("--retries", type=int, default=DEFAULT_RETRIES,
-                    help="restarts after a stalled run (default %d)" % DEFAULT_RETRIES)
+                    help="restarts after a run that stalled before printing anything "
+                         "(default %d); a run that had already started is never "
+                         "restarted" % DEFAULT_RETRIES)
     ap.add_argument("--sandbox", action="store_true",
                     help="macOS only: confine writes/deletes to --dir at the OS level")
     ap.add_argument("--key-command",
@@ -257,6 +369,7 @@ def main(argv=None):
                          "--base-url; default MiniMax endpoint also tries $MINIMAX_API_KEY)")
     ap.add_argument("--variant", help="OpenCode agent variant (optional)")
     args = ap.parse_args(argv)
+    install_termination_handlers()  # so an abort takes OpenCode and the key file with it
 
     task = args.task if args.task is not None else sys.stdin.read().strip()
     if not task:
@@ -281,4 +394,10 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        # Ctrl-C: the cleanup already ran on the way out, so report it plainly
+        # instead of dumping a traceback.
+        log("aborted (Ctrl-C)")
+        sys.exit(130)

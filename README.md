@@ -57,9 +57,10 @@ You need three things:
    **Runtime exposure:** OpenCode needs the credential in its generated configuration. During
    each run, this wrapper therefore writes it in clear text to a mode-`0600` `config.json`
    inside a private mode-`0700` system-temp directory named `opencode-minimax-*`. Normal exits
-   remove that directory. A hard crash, `SIGKILL`, or power loss can leave the temporary copy
-   behind; inspect the system temp directory and remove stale `opencode-minimax-*` directories
-   if a run was terminated that way.
+   remove that directory, and so does an abort with Ctrl-C, `SIGTERM` or `SIGHUP`.
+   A hard crash, `SIGKILL`, or power loss can leave the temporary copy behind; inspect the
+   system temp directory and remove stale `opencode-minimax-*` directories if a run was
+   terminated that way.
 
    **Or, the quick way:** set an environment variable for the current terminal instead:
    ```bash
@@ -208,12 +209,18 @@ real cause is the setup. `minimax_agent.py` handles all four for you:
 3. **Bypass the global config to dodge plugin hangs.** A global `~/.config/opencode` can load
    an `@latest` plugin that revalidates against npm on every start and blocks OpenCode when
    npm is slow. An isolated `XDG_CONFIG_HOME` sidesteps it entirely.
-4. **Add a start-up timeout with retry.** OpenCode occasionally stalls at session start (a
-   small title/provider-init call) while the API itself is healthy. The stall happens before
-   the first tool call, so a restart is safe. The wrapper times out and retries; each attempt
-   runs in its own process group so child processes get cleaned up too.
+4. **Time out a stalled start — not a long task.** OpenCode occasionally stalls at session
+   start (a small title/provider-init call) while the API itself is healthy. The stall
+   happens before the first tool call, so a restart is safe. The wrapper watches OpenCode's
+   output and counts *silence* only: a run that keeps printing is never cut off, however
+   long it takes, and only a run that never printed anything is restarted. A run that goes
+   quiet after it had already started is killed without a retry (exit code 124), so a second
+   attempt never continues on a half-finished work directory. Each attempt gets its own
+   process group, and every abort — timeout, Ctrl-C, `SIGTERM`, `SIGHUP` — kills that whole
+   group (OpenCode plus its `bun` children) before the temporary config is removed;
+   otherwise the model keeps editing files after you stopped the wrapper.
 
-The whole thing is about 200 lines of Python you can read in one sitting.
+The whole thing is about 250 lines of Python you can read in one sitting.
 
 </details>
 

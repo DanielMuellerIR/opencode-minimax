@@ -62,8 +62,9 @@ Du brauchst drei Dinge:
    Konfiguration. Der Wrapper schreibt es deshalb für jeden Lauf im Klartext in eine
    `config.json` mit Modus `0600`, innerhalb eines privaten System-Temp-Verzeichnisses mit
    Modus `0700` und Namen `opencode-minimax-*`. Bei normalem Ende wird dieses Verzeichnis
-   gelöscht. Ein harter Abbruch, `SIGKILL` oder Stromausfall kann die temporäre Kopie
-   zurücklassen; nach einem solchen Abbruch das System-Temp-Verzeichnis prüfen und verwaiste
+   gelöscht, ebenso bei einem Abbruch mit Strg-C, `SIGTERM` oder `SIGHUP`.
+   Ein harter Abbruch, `SIGKILL` oder Stromausfall kann die temporäre Kopie zurücklassen;
+   nach einem solchen Abbruch das System-Temp-Verzeichnis prüfen und verwaiste
    `opencode-minimax-*`-Verzeichnisse entfernen.
 
    **Oder schnell:** stattdessen eine Umgebungsvariable für das aktuelle Terminal setzen:
@@ -219,13 +220,19 @@ alle vier für dich:
    `~/.config/opencode` kann ein `@latest`-Plugin laden, das bei jedem Start gegen npm
    revalidiert und OpenCode bei langsamem npm blockiert. Ein isoliertes `XDG_CONFIG_HOME`
    umgeht das komplett.
-4. **Einen Start-Timeout mit Retry einbauen.** OpenCode hängt gelegentlich beim Session-Start
-   (ein kleiner Titel-/Provider-Init-Call), während die API selbst gesund ist. Der Hänger
-   liegt vor dem ersten Tool-Call, ein Neustart ist also gefahrlos. Der Wrapper setzt Timeout
-   und Retry; jeder Versuch läuft in einer eigenen Prozessgruppe, damit auch Kindprozesse
-   aufgeräumt werden.
+4. **Nur einen hängenden Start abbrechen — keine lange Aufgabe.** OpenCode hängt gelegentlich
+   beim Session-Start (ein kleiner Titel-/Provider-Init-Call), während die API selbst gesund
+   ist. Der Hänger liegt vor dem ersten Tool-Call, ein Neustart ist also gefahrlos. Der
+   Wrapper beobachtet OpenCodes Ausgabe und zählt nur *Stille*: Ein Lauf, der weiter etwas
+   ausgibt, wird nie abgeschnitten, egal wie lange er dauert; neu gestartet wird nur ein
+   Lauf, der überhaupt nichts ausgegeben hat. Verstummt ein Lauf, der schon angefangen hatte,
+   wird er ohne Neustart beendet (Exit-Code 124) — sonst setzte ein zweiter Versuch auf einem
+   halbfertigen Arbeitsverzeichnis auf. Jeder Versuch läuft in einer eigenen Prozessgruppe,
+   und jeder Abbruch (Timeout, Strg-C, `SIGTERM`, `SIGHUP`) beendet diese ganze Gruppe
+   (OpenCode samt `bun`-Kindern), bevor die temporäre Konfiguration gelöscht wird; sonst
+   arbeitet das Modell weiter, nachdem man den Wrapper gestoppt hat.
 
-Das Ganze sind rund 200 Zeilen Python, die man in einem Rutsch liest.
+Das Ganze sind rund 250 Zeilen Python, die man in einem Rutsch liest.
 
 </details>
 
