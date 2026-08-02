@@ -9,6 +9,18 @@ aus dem Code/README ablesbar ist.
 - **Zweck:** MiniMax als agentischen Coding-Assistenten über OpenCode nutzen — alltägliche Coding-Aufgaben an ein starkes, günstiges Modell delegieren.
 - **Plattform:** CLI
 
+## Tests
+
+Die Regressionstests liegen in [tests/](tests) und brauchen keine Zusatzpakete:
+
+```bash
+python3 -m unittest discover          # Repo-Wurzel; findet tests/ als Paket
+python3 tests/test_minimax_agent.py   # dieselbe Datei direkt aufgerufen
+```
+
+Kein Test ruft die MiniMax-API oder OpenCode auf; die Prozess- und Sandbox-Tests
+starten nur kurze lokale Hilfsprozesse.
+
 ## Verzeichnisstruktur
 
 <!-- directory-structure: generated -->

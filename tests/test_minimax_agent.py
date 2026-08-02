@@ -4,15 +4,23 @@ import json
 import os
 import stat
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
-import minimax_agent
-
-
 REPO = Path(__file__).resolve().parent.parent
+# Beim direkten Aufruf (`python3 tests/test_minimax_agent.py`) steht nur dieses
+# Verzeichnis im Suchpfad; das Repo-Wurzelverzeichnis kommt hier dazu, damit
+# `minimax_agent` importierbar ist. Bei `python3 -m unittest discover` ist es
+# ohnehin schon enthalten, der Eintrag schadet dort nicht.
+if str(REPO) not in sys.path:
+    sys.path.insert(0, str(REPO))
+
+import minimax_agent  # noqa: E402  (Import erst nach dem Suchpfad-Eintrag möglich)
+
+
 CUSTOM_URL = "https://other-provider.invalid/v1"
 
 
