@@ -229,7 +229,8 @@ real cause is the setup. `minimax_agent.py` handles all four for you:
    group (OpenCode plus its `bun` children) before the temporary config is removed;
    otherwise the model keeps editing files after you stopped the wrapper.
 
-The whole thing is about 250 lines of Python you can read in one sitting.
+The whole thing is one short Python file — about 400 lines including its comments — that you
+can read in one sitting.
 
 </details>
 

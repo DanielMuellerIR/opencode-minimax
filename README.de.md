@@ -242,7 +242,8 @@ alle vier für dich:
    (OpenCode samt `bun`-Kindern), bevor die temporäre Konfiguration gelöscht wird; sonst
    arbeitet das Modell weiter, nachdem man den Wrapper gestoppt hat.
 
-Das Ganze sind rund 250 Zeilen Python, die man in einem Rutsch liest.
+Das Ganze ist eine einzige kurze Python-Datei — rund 400 Zeilen samt Kommentaren —, die man
+in einem Rutsch liest.
 
 </details>
 
