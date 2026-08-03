@@ -161,7 +161,8 @@ def kill_process_group(proc, grace=5):
         try:
             os.killpg(os.getpgid(proc.pid), sig)
         except (ProcessLookupError, PermissionError, OSError):
-            return                         # already gone (or never ours to signal)
+            proc.poll()                    # already gone: collect it so no zombie is left
+            return
         try:
             proc.wait(timeout=grace)
             return
@@ -275,8 +276,8 @@ def run(task, work_dir, key, *, model, base_url, context, max_output,
     #     ~/.local/share/opencode by default. If you confine writes to the work dir only
     #     (see --sandbox), that DB write is denied and OpenCode crashes IMMEDIATELY
     #     (PRAGMA wal_checkpoint) before the model even runs — the classic "it won't write"
-    #     trap. The system temp dir is always writable inside the sandbox, so putting the
-    #     XDG home here makes the confined write path work.
+    #     trap. This directory is one of the two paths the sandbox profile makes writable
+    #     (the other is the work dir), so putting the XDG home here makes that path work.
     #  2) Plugin immunity: a global ~/.config/opencode may load an "@latest" plugin that
     #     revalidates against npm on every start and blocks OpenCode when npm is slow. An
     #     isolated XDG_CONFIG_HOME bypasses the global config completely.
