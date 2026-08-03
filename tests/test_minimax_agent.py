@@ -219,6 +219,77 @@ class TemporaryConfigTests(unittest.TestCase):
             self.assertFalse(home.exists())
 
 
+class SandboxConfinementTests(unittest.TestCase):
+    """Die Sandbox darf nur das Arbeitsverzeichnis und das eigene Temp-Home freigeben."""
+
+    def test_profile_allows_only_the_directories_it_is_given(self):
+        profile = minimax_agent.build_seatbelt_profile(["/private/tmp/work-x",
+                                                        "/private/tmp/home-y"])
+
+        self.assertIn('(subpath "/private/tmp/work-x")', profile)
+        self.assertIn('(subpath "/private/tmp/home-y")', profile)
+        # Die gemeinsam genutzten Temp-Verzeichnisse des Kontos bleiben zu: sonst koennte
+        # ein eingesperrter Lauf die Temp- und Cache-Dateien anderer Prozesse aendern.
+        for shared in ('(subpath "/private/tmp")',
+                       '(subpath "/private/var/tmp")',
+                       '(subpath "/private/var/folders")'):
+            self.assertNotIn(shared + "\n", profile)
+
+    @unittest.skipUnless(sys.platform == "darwin", "seatbelt gibt es nur auf macOS")
+    def test_sandbox_exec_blocks_writes_outside_the_work_dir(self):
+        with tempfile.TemporaryDirectory(prefix="opencode_minimax_sandbox_") as td:
+            work = Path(td) / "work"
+            work.mkdir()
+            outside = Path(td) / "outside"  # Nachbarverzeichnis im selben System-Temp
+            outside.mkdir()
+            profile = Path(td) / "profile.sb"
+            profile.write_text(
+                minimax_agent.build_seatbelt_profile([os.path.realpath(work)]))
+
+            allowed = subprocess.run(
+                ["sandbox-exec", "-f", str(profile), "/usr/bin/touch", str(work / "ok")],
+                capture_output=True, text=True)
+            denied = subprocess.run(
+                ["sandbox-exec", "-f", str(profile), "/usr/bin/touch", str(outside / "no")],
+                capture_output=True, text=True)
+
+            self.assertEqual(allowed.returncode, 0, allowed.stderr)
+            self.assertNotEqual(denied.returncode, 0)
+            self.assertFalse((outside / "no").exists())
+
+    def test_run_points_tool_scratch_files_at_the_run_home(self):
+        with tempfile.TemporaryDirectory(prefix="opencode_minimax_scratch_") as td:
+            home = Path(td) / "run-home"
+
+            def inspect_run(_cmd, env, _timeout, _retries):
+                scratch = Path(env["TMPDIR"])
+                self.assertEqual(env["TMP"], env["TMPDIR"])
+                self.assertEqual(env["TEMP"], env["TMPDIR"])
+                self.assertEqual(scratch.parent, home)  # innerhalb des Lauf-Temp-Homes
+                self.assertTrue(scratch.is_dir())
+                return 0
+
+            with mock.patch.object(minimax_agent.tempfile, "mkdtemp", return_value=str(home)):
+                with mock.patch.object(
+                    minimax_agent, "run_with_timeout", side_effect=inspect_run
+                ):
+                    result = minimax_agent.run(
+                        "synthetic task",
+                        td,
+                        "synthetic-key",
+                        model=minimax_agent.DEFAULT_MODEL,
+                        base_url=minimax_agent.DEFAULT_BASE_URL,
+                        context=minimax_agent.DEFAULT_CONTEXT,
+                        max_output=minimax_agent.DEFAULT_MAX_OUTPUT,
+                        system_prompt=None,
+                        timeout=1,
+                        retries=0,
+                        sandbox=False,
+                    )
+
+            self.assertEqual(result, 0)
+
+
 class TimeoutSemanticsTests(unittest.TestCase):
     """`--timeout` begrenzt Stille, nicht die Gesamtlaufzeit.
 

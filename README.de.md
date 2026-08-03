@@ -190,7 +190,9 @@ bereits für dich:
 - **Reviews** laufen gegen eine **Wegwerf-Kopie** deines Repos, sodass nichts deine Arbeit
   verändern kann.
 - **Fixes** laufen mit `--sandbox` (macOS): das hindert den Assistenten daran, außerhalb des
-  Zielordners zu schreiben — auch versehentlich nicht.
+  Zielordners zu schreiben — auch versehentlich nicht. Beschreibbar ist sonst nur das eigene
+  Temp-Verzeichnis des Laufs, das am Ende gelöscht wird; die Temp- und Cache-Dateien deiner
+  anderen Programme bleiben tabu.
 - **Sieh dir die Änderung an, bevor du sie behältst** (`git diff`). Behandle den Assistenten
   als schnellen, fähigen Helfer, dessen Arbeit du prüfst — nicht als Orakel.
 - `--dir` niemals auf dein Home-Verzeichnis oder einen breiten Pfad zeigen lassen.
@@ -215,7 +217,9 @@ alle vier für dich:
    Arbeitsverzeichnis ein (die Sandbox), wird dieser DB-Zugriff verweigert und OpenCode
    stürzt *sofort* ab (`PRAGMA wal_checkpoint`) — noch bevor das Modell läuft. Genau das ist
    das „MiniMax kann nicht schreiben"-Symptom. Die Lösung: jedem Lauf ein isoliertes
-   `XDG_*`-Heim unter dem System-Temp geben, das die Sandbox stets freigibt.
+   `XDG_*`-Heim unter dem System-Temp geben und in der Sandbox genau dieses Verzeichnis
+   (plus `--dir`) zum Schreiben freigeben. `TMPDIR` zeigt ebenfalls dorthin, damit Werkzeuge
+   Platz für Zwischendateien haben, ohne dass die gemeinsamen Temp-Verzeichnisse offen sind.
 3. **Die globale Konfiguration umgehen, um Plugin-Hänger zu vermeiden.** Eine globale
    `~/.config/opencode` kann ein `@latest`-Plugin laden, das bei jedem Start gegen npm
    revalidiert und OpenCode bei langsamem npm blockiert. Ein isoliertes `XDG_CONFIG_HOME`

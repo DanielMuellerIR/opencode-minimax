@@ -181,7 +181,9 @@ this for you:
 
 - **Reviews** run against a **throwaway copy** of your repo, so nothing can change your work.
 - **Fixes** run with `--sandbox` (macOS), which stops the assistant from writing anywhere
-  outside the target folder, even by mistake.
+  outside the target folder, even by mistake. The only other writable place is the run's own
+  temporary directory, which is deleted when the run ends — the temp and cache files of your
+  other programs stay off limits.
 - **Always read the change before you keep it** (`git diff`). Treat the assistant as a fast,
   capable helper whose work you check — not an oracle.
 - Never point `--dir` at your home folder or a broad path.
@@ -205,7 +207,8 @@ real cause is the setup. `minimax_agent.py` handles all four for you:
    sandbox), that database write is denied and OpenCode crashes *immediately*
    (`PRAGMA wal_checkpoint`) — before the model runs. This is the classic "MiniMax can't
    write" symptom. The fix: give each run an isolated `XDG_*` home under the system temp
-   dir, which the sandbox always allows.
+   dir and allow writes to exactly that directory (plus `--dir`) in the sandbox. `TMPDIR`
+   points there too, so tools find scratch space without the shared temp dirs being open.
 3. **Bypass the global config to dodge plugin hangs.** A global `~/.config/opencode` can load
    an `@latest` plugin that revalidates against npm on every start and blocks OpenCode when
    npm is slow. An isolated `XDG_CONFIG_HOME` sidesteps it entirely.

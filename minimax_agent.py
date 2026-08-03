@@ -107,11 +107,14 @@ def get_api_key(key_command, base_url=DEFAULT_BASE_URL):
 
 def build_seatbelt_profile(write_dirs):
     """macOS seatbelt profile: allow everything EXCEPT writing; permit writes only under
-    write_dirs plus the system temp dirs (which many tools need for scratch/cache)."""
+    write_dirs plus a few harmless device files.
+
+    Callers pass exactly two directories: the work dir and this run's private temp home
+    (see run(), which also points TMPDIR/TMP/TEMP at it). The system temp dirs as a whole
+    are deliberately NOT writable — that would let a confined run change or delete the
+    scratch and cache files of every other process running under the same account, which
+    is not what "writes are confined to --dir" promises."""
     system_writable = [
-        '(subpath "/private/var/folders")',   # macOS per-user temp/cache
-        '(subpath "/private/tmp")',
-        '(subpath "/private/var/tmp")',
         '(literal "/dev/null")', '(literal "/dev/zero")',
         '(literal "/dev/stdout")', '(literal "/dev/stderr")',
         '(subpath "/dev/fd")', '(literal "/dev/random")',
@@ -307,12 +310,19 @@ def run(task, work_dir, key, *, model, base_url, context, max_output,
         with open(cfg_path, "w") as fh:
             json.dump(cfg, fh)
         os.chmod(cfg_path, 0o600)
+        scratch = os.path.join(home, "tmp")
+        os.makedirs(scratch, exist_ok=True)
         env = dict(os.environ,
                    OPENCODE_CONFIG=cfg_path,
                    XDG_CONFIG_HOME=os.path.join(home, "config"),
                    XDG_DATA_HOME=os.path.join(home, "data"),
                    XDG_CACHE_HOME=os.path.join(home, "cache"),
-                   XDG_STATE_HOME=os.path.join(home, "state"))
+                   XDG_STATE_HOME=os.path.join(home, "state"),
+                   # Every tool's scratch files land inside this run's own temp home, which
+                   # goes away with it. Under --sandbox that home and --dir are the only
+                   # writable places, so a redirected TMPDIR is what keeps tools working
+                   # without opening up the shared system temp dirs.
+                   TMPDIR=scratch, TMP=scratch, TEMP=scratch)
         if not uses_default_base_url(base_url):
             # Even when the custom provider uses its explicit key-command value,
             # do not expose an unrelated MiniMax key to OpenCode or its tools.
@@ -326,7 +336,10 @@ def run(task, work_dir, key, *, model, base_url, context, max_output,
                 log("ERROR: --sandbox uses macOS seatbelt and only works on macOS. "
                     "On Linux, wrap this command with bubblewrap/firejail instead.")
                 return 2
-            profile = build_seatbelt_profile([os.path.realpath(work_dir)])
+            # realpath: the temp home lives under /var/folders, which is a symlink to
+            # /private/var/folders — seatbelt only understands the resolved path.
+            profile = build_seatbelt_profile(
+                [os.path.realpath(work_dir), os.path.realpath(home)])
             prof_path = os.path.join(home, "profile.sb")
             with open(prof_path, "w") as pf:
                 pf.write(profile)
@@ -363,7 +376,8 @@ def main(argv=None):
                          "(default %d); a run that had already started is never "
                          "restarted" % DEFAULT_RETRIES)
     ap.add_argument("--sandbox", action="store_true",
-                    help="macOS only: confine writes/deletes to --dir at the OS level")
+                    help="macOS only: confine writes/deletes at the OS level to --dir and "
+                         "the run's own temp dir (removed when the run ends)")
     ap.add_argument("--key-command",
                     help="shell command that prints the API key (required for custom "
                          "--base-url; default MiniMax endpoint also tries $MINIMAX_API_KEY)")
