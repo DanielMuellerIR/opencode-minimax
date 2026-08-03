@@ -121,9 +121,13 @@ examples/review-repo.sh /path/to/your/repo
 examples/fix-in-sandbox.sh /path/to/your/repo "Fix the crash when the input list is empty."
 ```
 
+Both example scripts pick the right degree of confinement for your platform: on macOS they
+add `--sandbox`, elsewhere they run the same task without it (see [Good to know](#good-to-know)).
+
 Or call the tool directly:
 
 ```bash
+# --sandbox is macOS-only; on other systems drop it and work in a throwaway copy.
 minimax_agent.py --dir ./my-project --sandbox "Add a --verbose flag to cli.py."
 ```
 
@@ -179,7 +183,9 @@ ready-to-paste file: [`examples/assistant-instructions.md`](examples/assistant-i
 The assistant edits files on its own, so keep it boxed in — the examples above already do
 this for you:
 
-- **Reviews** run against a **throwaway copy** of your repo, so nothing can change your work.
+- **Reviews** run against a **throwaway copy** of your repo, so your working tree is out of
+  the way. On macOS the review is additionally sandboxed, which is what actually stops a
+  write to the original checkout — the throwaway worktree shares its git directory with it.
 - **Fixes** run with `--sandbox` (macOS), which stops the assistant from writing anywhere
   outside the target folder, even by mistake. The only other writable place is the run's own
   temporary directory, which is deleted when the run ends — the temp and cache files of your

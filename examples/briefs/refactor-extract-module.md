@@ -2,6 +2,9 @@
 
     python3 minimax_agent.py --dir ./my-project --sandbox < examples/briefs/refactor-extract-module.md
 
+`--sandbox` is macOS-only; on other systems drop it and run against a throwaway
+git worktree instead.
+
 ---
 
 Extract the URL-parsing helpers from `utils.py` into a new file `url.py`.

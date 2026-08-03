@@ -19,9 +19,16 @@ echo "== before: the test fails =="
 ( cd "$work" && python3 test_calc.py ) || true
 echo
 
-echo "== delegating the fix to MiniMax (writes confined to the demo dir) =="
-python3 "$here/../minimax_agent.py" --dir "$work" --sandbox \
-  "Fix average() in calc.py: return 0.0 on empty input instead of raising. Keep it minimal; do not touch test_calc.py."
+echo "== delegating the fix to MiniMax =="
+task="Fix average() in calc.py: return 0.0 on empty input instead of raising. Keep it minimal; do not touch test_calc.py."
+if [ "$(uname -s)" = "Darwin" ]; then
+  # macOS: --sandbox confines writes to the demo directory at the operating-system level.
+  python3 "$here/../minimax_agent.py" --dir "$work" --sandbox "$task"
+else
+  # Elsewhere --sandbox uses the macOS seatbelt and would abort the run, so it is left out.
+  # The demo is still safe: it works on a throwaway copy, not on your files.
+  python3 "$here/../minimax_agent.py" --dir "$work" "$task"
+fi
 echo
 
 echo "== the change the agent made =="

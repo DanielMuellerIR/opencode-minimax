@@ -126,9 +126,13 @@ examples/review-repo.sh /pfad/zu/deinem/repo
 examples/fix-in-sandbox.sh /pfad/zu/deinem/repo "Fixe den Absturz bei leerer Eingabeliste."
 ```
 
+Beide Beispielskripte wählen die passende Einsperrung für dein System: auf macOS ergänzen sie
+`--sandbox`, sonst läuft dieselbe Aufgabe ohne (siehe [Gut zu wissen](#gut-zu-wissen)).
+
 Oder das Tool direkt aufrufen:
 
 ```bash
+# --sandbox gibt es nur auf macOS; auf anderen Systemen weglassen und in einer Wegwerf-Kopie arbeiten.
 minimax_agent.py --dir ./mein-projekt --sandbox "Füge cli.py eine --verbose-Option hinzu."
 ```
 
@@ -187,8 +191,10 @@ Es liegt auch als fertig einfügbare Datei bereit:
 Der Assistent editiert selbstständig Dateien, also sperr ihn ein — die Beispiele oben tun das
 bereits für dich:
 
-- **Reviews** laufen gegen eine **Wegwerf-Kopie** deines Repos, sodass nichts deine Arbeit
-  verändern kann.
+- **Reviews** laufen gegen eine **Wegwerf-Kopie** deines Repos, dein Arbeitsstand ist also
+  aus dem Weg. Auf macOS läuft das Review zusätzlich in der Sandbox — erst die verhindert
+  wirklich einen Schreibzugriff auf den Original-Checkout, mit dem sich der Wegwerf-Worktree
+  sein Git-Verzeichnis teilt.
 - **Fixes** laufen mit `--sandbox` (macOS): das hindert den Assistenten daran, außerhalb des
   Zielordners zu schreiben — auch versehentlich nicht. Beschreibbar ist sonst nur das eigene
   Temp-Verzeichnis des Laufs, das am Ende gelöscht wird; die Temp- und Cache-Dateien deiner

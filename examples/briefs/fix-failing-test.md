@@ -5,6 +5,9 @@ look, how success is checked, and clear boundaries. Pipe it in with:
 
     python3 minimax_agent.py --dir ./my-project --sandbox < examples/briefs/fix-failing-test.md
 
+`--sandbox` is macOS-only; on other systems drop it and run against a throwaway
+git worktree instead.
+
 ---
 
 Fix the failing test in this project.

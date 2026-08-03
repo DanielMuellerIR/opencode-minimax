@@ -2,6 +2,9 @@
 
     python3 minimax_agent.py --dir ./my-project --sandbox < examples/briefs/add-cli-flag.md
 
+`--sandbox` is macOS-only; on other systems drop it and run against a throwaway
+git worktree instead.
+
 ---
 
 Add a `--dry-run` flag to the command-line tool in `cli.py`.

@@ -3,6 +3,7 @@
 import io
 import json
 import os
+import re
 import signal
 import stat
 import subprocess
@@ -26,6 +27,14 @@ import minimax_agent  # noqa: E402  (Import erst nach dem Suchpfad-Eintrag mögl
 
 
 CUSTOM_URL = "https://other-provider.invalid/v1"
+
+
+def _squash(text):
+    """Fasst jede Folge von Leerzeichen/Umbruechen zu einem Leerzeichen zusammen.
+
+    So pruefen die Doku-Tests den Wortlaut und nicht den Zeilenumbruch.
+    """
+    return re.sub(r"\s+", " ", text)
 
 
 def _marker():
@@ -454,26 +463,68 @@ class ProcessLifecycleTests(unittest.TestCase):
 
 
 class DocumentationTests(unittest.TestCase):
-    def test_keychain_docs_disclose_temporary_plaintext_and_crash_remainder(self):
-        english = (REPO / "README.md").read_text(encoding="utf-8")
-        german = (REPO / "README.de.md").read_text(encoding="utf-8")
+    """Prueft die zugesagten Aussagen selbst, nicht nur einzelne Stichwoerter.
 
-        self.assertIn("opencode-minimax-*", english)
-        self.assertIn("hard crash", english)
-        self.assertIn("opencode-minimax-*", german)
-        self.assertIn("harter Abbruch", german)
+    Alle Vergleiche laufen ueber `_squash`, damit ein anderer Zeilenumbruch im
+    Fliesstext keinen Fehlalarm ausloest — der Wortlaut muss stimmen, die
+    Formatierung darf sich aendern.
+    """
+
+    def test_keychain_docs_disclose_the_full_security_promise(self):
+        english = _squash((REPO / "README.md").read_text(encoding="utf-8"))
+        german = _squash((REPO / "README.de.md").read_text(encoding="utf-8"))
+
+        # Der Key liegt waehrend des Laufs im Klartext auf der Platte: Ablageort,
+        # Rechte, Aufraeumen und die Grenze des Aufraeumens muessen dastehen.
+        for phrase in ("in clear text", "mode-`0600` `config.json`",
+                       "mode-`0700` system-temp directory named `opencode-minimax-*`",
+                       "Ctrl-C, `SIGTERM` or `SIGHUP`", "A hard crash, `SIGKILL`, or power "
+                       "loss can leave the temporary copy behind"):
+            self.assertIn(phrase, english)
+        for phrase in ("im Klartext", "`config.json` mit Modus `0600`",
+                       "Modus `0700` und Namen `opencode-minimax-*`",
+                       "Strg-C, `SIGTERM` oder `SIGHUP`",
+                       "Ein harter Abbruch, `SIGKILL` oder Stromausfall kann die temporäre "
+                       "Kopie zurücklassen"):
+            self.assertIn(phrase, german)
 
     def test_ready_snippets_branch_between_macos_and_linux(self):
-        snippets = [
-            (REPO / "examples/assistant-instructions.md").read_text(encoding="utf-8"),
-            (REPO / "README.md").read_text(encoding="utf-8"),
-            (REPO / "README.de.md").read_text(encoding="utf-8"),
-        ]
-        for text in snippets:
-            self.assertIn("macOS", text)
-            self.assertIn("Linux", text)
-            self.assertIn("bubblewrap", text)
-            self.assertIn("firejail", text)
+        for name in ("examples/assistant-instructions.md", "README.md", "README.de.md"):
+            text = _squash((REPO / name).read_text(encoding="utf-8"))
+            with self.subTest(name):
+                # Der macOS-Aufruf MIT --sandbox ...
+                self.assertRegex(
+                    text, r"macOS:\s*`?python3 \S*minimax_agent\.py --dir <wt> --sandbox")
+                # ... und daneben der Aufruf OHNE --sandbox fuer alle anderen Systeme.
+                self.assertRegex(
+                    text, r"Linux/(non|Nicht)-macOS:[^.]*(without|ohne) `?--sandbox")
+                self.assertIn("bubblewrap", text)
+                self.assertIn("firejail", text)
+
+    def test_advertised_entry_points_do_not_force_sandbox_on_other_systems(self):
+        """Jeder beworbene Copy-and-paste-Einstieg muss auf Nicht-macOS laufen."""
+        for name in ("examples/run-demo.sh", "examples/review-repo.sh"):
+            script = (REPO / name).read_text(encoding="utf-8")
+            calls = [line.strip() for line in script.splitlines()
+                     if "minimax_agent.py" in line and not line.strip().startswith("#")]
+            with self.subTest(name):
+                self.assertIn('uname -s', script)          # Verzweigung nach Plattform
+                self.assertEqual(len(calls), 2, calls)     # je ein Zweig
+                self.assertEqual([("--sandbox" in c) for c in calls].count(True), 1, calls)
+
+        for brief in sorted((REPO / "examples/briefs").glob("*.md")):
+            text = brief.read_text(encoding="utf-8")
+            with self.subTest(brief.name):
+                if "--sandbox" in text:
+                    self.assertIn("`--sandbox` is macOS-only", _squash(text))
+
+    def test_review_example_does_not_overpromise_isolation(self):
+        script = (REPO / "examples/review-repo.sh").read_text(encoding="utf-8")
+
+        # Der Wegwerf-Worktree teilt sein Git-Verzeichnis mit dem Original; ohne
+        # Sandbox ist "kann physisch nichts aendern" schlicht falsch.
+        self.assertNotIn("physically cannot", script)
+        self.assertIn("shares its git directory", _squash(script))
 
 
 if __name__ == "__main__":
