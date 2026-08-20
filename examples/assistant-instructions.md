@@ -17,12 +17,15 @@ For well-specified implementation work (new code, refactors, mechanical edits, b
 delegate to MiniMax instead of writing it yourself, to save frontier tokens:
 
 1. Write a precise brief: goal, files, success criterion, style, and what not to touch.
-2. Make a throwaway git worktree of the target repo:  `git worktree add -f <wt> HEAD`
+2. Require a clean source repository, then make a throwaway Git worktree of committed
+   `HEAD`: `git worktree add -f <wt> HEAD`. Uncommitted work is not copied.
 3. Run according to the host platform (or pipe the brief in via stdin):
    - macOS: `python3 /path/to/opencode-minimax/minimax_agent.py --dir <wt> --sandbox "<brief>"`
    - Linux/non-macOS: run the same command without `--sandbox` inside the throwaway
      worktree. If an approved `bubblewrap`/`firejail` wrapper exists, use it for OS-level
      confinement. The worktree protects the original checkout but is not an OS sandbox.
+   On macOS, the shared Git directory remains read-only inside seatbelt; the delegated task
+   should edit files and run tests, not run Git commands that write metadata.
 4. Read the resulting `git -C <wt> diff`, check correctness, scope and style, then merge.
    Never blind-merge machine output.
 5. Remove the worktree when done.

@@ -24,12 +24,12 @@ Safety: OpenCode's `run` edits files under --dir WITHOUT asking. For read-only w
 import argparse
 import json
 import os
+import selectors
 import shutil
 import signal
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -39,6 +39,7 @@ DEFAULT_CONTEXT = 1_000_000
 DEFAULT_MAX_OUTPUT = 16_384
 DEFAULT_TIMEOUT = 300
 DEFAULT_RETRIES = 1
+KEY_COMMAND_TIMEOUT = 30
 DEFAULT_SYSTEM_PROMPT = os.path.join(_HERE, "system-prompt.md")
 DEFAULT_KEYCHAIN_SERVICE = "minimax-api-key"  # macOS Keychain fallback (see get_api_key)
 
@@ -64,26 +65,37 @@ def get_keychain_account():
 def get_api_key(key_command, base_url=DEFAULT_BASE_URL):
     """Return the API key, trying three sources in order:
 
-    1. `--key-command` output (a command that prints the key — keeps the secret out of your
-       shell history and process arguments, e.g. reading it from a password manager);
+    1. `--key-command` output (exactly one non-empty line within 30 seconds; a failure is
+       final and never falls back to an unrelated credential source);
     2. for the default MiniMax endpoint only, the `MINIMAX_API_KEY` environment variable;
     3. for the default endpoint on macOS, the current account's Keychain generic-password
        entry named `minimax-api-key` (create it once with:
-       `security add-generic-password -a "$USER" -s minimax-api-key -w`).
+       `security add-generic-password -a "$USER" -s minimax-api-key -U -w`).
 
     A custom endpoint deliberately accepts only `--key-command`: provider-specific
     credentials must be selected explicitly rather than inheriting a MiniMax key.
     """
     if key_command:
-        r = subprocess.run(key_command, shell=True, capture_output=True, text=True)
-        key = (r.stdout or "").strip()
-        if key:
-            return key
-        if uses_default_base_url(base_url):
-            log("key-command produced no output; falling back to MINIMAX_API_KEY / Keychain")
-        else:
-            log("key-command produced no output; custom endpoints have no implicit key fallback")
+        try:
+            r = subprocess.run(key_command, shell=True, capture_output=True, text=True,
+                               timeout=KEY_COMMAND_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            log("ERROR: key-command did not finish within %d seconds" % KEY_COMMAND_TIMEOUT)
             return None
+        if r.returncode != 0:
+            detail = " ".join((r.stderr or "").split())[:300]
+            log("ERROR: key-command failed with exit code %d%s"
+                % (r.returncode, ": " + detail if detail else ""))
+            return None
+        lines = [line.strip() for line in (r.stdout or "").splitlines() if line.strip()]
+        if len(lines) != 1:
+            log("ERROR: key-command must print exactly one non-empty line; got %d" % len(lines))
+            return None
+        key = lines[0]
+        if any(ord(char) < 32 or ord(char) == 127 for char in key):
+            log("ERROR: key-command output contains a control character")
+            return None
+        return key
     if not uses_default_base_url(base_url):
         return None
     env = (os.environ.get("MINIMAX_API_KEY") or "").strip()
@@ -105,6 +117,13 @@ def get_api_key(key_command, base_url=DEFAULT_BASE_URL):
     return None
 
 
+def _sbpl_string(value):
+    """Quote one path for an SBPL string without allowing rule injection."""
+    if any(ord(char) < 32 or ord(char) == 127 for char in value):
+        raise ValueError("sandbox paths must not contain control characters")
+    return '"%s"' % value.replace("\\", "\\\\").replace('"', '\\"')
+
+
 def build_seatbelt_profile(write_dirs):
     """macOS seatbelt profile: allow everything EXCEPT writing; permit writes only under
     write_dirs plus a few harmless device files.
@@ -118,8 +137,10 @@ def build_seatbelt_profile(write_dirs):
         '(literal "/dev/null")', '(literal "/dev/zero")',
         '(literal "/dev/stdout")', '(literal "/dev/stderr")',
         '(subpath "/dev/fd")', '(literal "/dev/random")',
+        '(literal "/dev/tty")', '(regex #"^/dev/ttys[0-9]*$")',
     ]
-    allow = "\n  ".join(['(subpath "%s")' % d for d in write_dirs] + system_writable)
+    allow = "\n  ".join(["(subpath %s)" % _sbpl_string(d) for d in write_dirs]
+                         + system_writable)
     return (
         "(version 1)\n"
         "(allow default)\n"        # reading, exec and network stay open so the tool can work
@@ -136,6 +157,8 @@ def install_termination_handlers():
     working in the background. Raising SystemExit from the handler unwinds through the
     cleanup paths instead. SIGINT (Ctrl-C) already raises KeyboardInterrupt and unwinds
     the same way, so it needs no handler."""
+    previous = {}
+
     def bail_out(signum, _frame):
         raise SystemExit(128 + signum)  # shell convention for "killed by signal N"
 
@@ -144,9 +167,21 @@ def install_termination_handlers():
         if sig is None:
             continue                       # not available on this platform
         try:
+            previous[sig] = signal.getsignal(sig)
             signal.signal(sig, bail_out)
         except (OSError, ValueError):
+            previous.pop(sig, None)
             pass                           # e.g. imported and called off the main thread
+    return previous
+
+
+def restore_termination_handlers(previous):
+    """Restore handlers changed by install_termination_handlers()."""
+    for sig, handler in previous.items():
+        try:
+            signal.signal(sig, handler)
+        except (OSError, ValueError):
+            pass
 
 
 def kill_process_group(proc, grace=5):
@@ -157,77 +192,110 @@ def kill_process_group(proc, grace=5):
     be shot down explicitly, or the model keeps editing files after the abort. SIGTERM
     first so OpenCode can shut down cleanly; whatever survives the grace period gets
     SIGKILL."""
+    if proc.poll() is not None:
+        return
+    pgid = proc.pid  # start_new_session=True guarantees PID == process-group ID.
     for sig in (signal.SIGTERM, signal.SIGKILL):
         try:
-            os.killpg(os.getpgid(proc.pid), sig)
-        except (ProcessLookupError, PermissionError, OSError):
+            os.killpg(pgid, sig)
+        except ProcessLookupError:
             proc.poll()                    # already gone: collect it so no zombie is left
             return
-        try:
-            proc.wait(timeout=grace)
-            return
-        except subprocess.TimeoutExpired:
-            # SIGTERM ignored, or a child stuck in uninterruptible I/O — escalate once.
+        except OSError as exc:
+            log("could not send %s to process group %d: %s"
+                % (signal.Signals(sig).name, pgid, exc))
             continue
+        deadline = time.monotonic() + grace
+        while time.monotonic() < deadline:
+            proc.poll()                    # reap the direct child as soon as it exits
+            try:
+                os.killpg(pgid, 0)         # the whole group, not just the direct child
+            except ProcessLookupError:
+                return
+            except PermissionError:
+                pass                       # it still exists; SIGKILL gets one attempt below
+            time.sleep(0.05)
     log("process group still not gone after SIGKILL; continuing anyway")
 
 
-def _forward(stream, sink, seen):
-    """Pass one output stream of the child through unchanged and note when it last spoke.
-
-    Runs in its own thread. `seen` is the shared progress record read by _one_attempt."""
-    while True:
+def _drain_ready(selector, sinks, seen, wait):
+    """Read every ready child pipe once; sink failures do not hide child progress."""
+    events = selector.select(wait)
+    for key, _mask in events:
+        fd = key.fd
         try:
-            chunk = stream.read1(65536)    # returns as soon as anything is there
-        except (OSError, ValueError):
-            return                         # pipe closed while we were reading
+            chunk = os.read(fd, 65536)
+        except OSError:
+            selector.unregister(key.fileobj)
+            continue
         if not chunk:
-            return                         # end of output: the child is done writing
+            selector.unregister(key.fileobj)
+            continue
         seen["at"] = time.monotonic()
         seen["any"] = True
+        target = sinks.get(fd)
+        if target is None:
+            continue                       # still drain and count output after EPIPE
+        sink, binary = target
         try:
-            sink.write(chunk)
+            sink.write(chunk if binary else chunk.decode("utf-8", "replace"))
             sink.flush()
         except (OSError, ValueError):
-            return
+            sinks[fd] = None
+    return bool(events)
+
+
+def _normalise_returncode(rc):
+    """Map Python's negative signal return codes to the shell's 128+signal form."""
+    return 128 - rc if rc < 0 else rc
 
 
 def _one_attempt(cmd, env, timeout):
     """Run OpenCode once. Returns (exit code, "did it produce any output?").
 
     The exit code is None when the run was killed for staying silent for `timeout`
-    seconds. Output is piped through this process so silence is measurable at all;
-    it is written on to our own stdout/stderr as it arrives."""
-    proc = subprocess.Popen(cmd, env=env, start_new_session=True,
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    seen = {"at": time.monotonic(), "any": False}
-    pumps = [threading.Thread(target=_forward, args=(src, sink, seen), daemon=True)
-             for src, sink in ((proc.stdout, sys.stdout.buffer),
-                               (proc.stderr, sys.stderr.buffer))]
-    for pump in pumps:
-        pump.start()
+    seconds; only then does the second value say whether output preceded the timeout.
+    The main thread polls both pipes, so inherited write descriptors in a background
+    descendant cannot strand a reader thread after OpenCode itself exits."""
+    proc = None
+    selector = None
     try:
+        proc = subprocess.Popen(cmd, env=env, start_new_session=True,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        selector = selectors.DefaultSelector()
+        seen = {"at": time.monotonic(), "any": False}
+        sinks = {}
+        for pipe, stream in ((proc.stdout, sys.stdout), (proc.stderr, sys.stderr)):
+            selector.register(pipe, selectors.EVENT_READ)
+            sink = getattr(stream, "buffer", stream)
+            sinks[pipe.fileno()] = (sink, sink is not stream)
         while True:
+            _drain_ready(selector, sinks, seen, 0.2)
             rc = proc.poll()
             if rc is not None:
-                return rc, seen["any"]
+                drain_deadline = time.monotonic() + 0.05
+                while (time.monotonic() < drain_deadline
+                       and _drain_ready(selector, sinks, seen, 0)):
+                    pass                   # forward bytes already buffered at normal exit
+                return _normalise_returncode(rc), None
             if time.monotonic() - seen["at"] >= timeout:
                 kill_process_group(proc)
                 return None, seen["any"]
-            time.sleep(0.2)
     except BaseException:
         # Ctrl-C, SIGTERM/SIGHUP (see install_termination_handlers) or an internal error:
         # never leave OpenCode running behind our back.
-        kill_process_group(proc)
+        if proc is not None:
+            kill_process_group(proc)
         raise
     finally:
-        for pump in pumps:
-            pump.join(timeout=5)           # let the last output through
-        for pipe in (proc.stdout, proc.stderr):
-            try:
-                pipe.close()
-            except OSError:
-                pass
+        if selector is not None:
+            selector.close()
+        if proc is not None:
+            for pipe in (proc.stdout, proc.stderr):
+                try:
+                    pipe.close()
+                except OSError:
+                    pass
 
 
 def run_with_timeout(cmd, env, timeout, retries):
@@ -245,17 +313,27 @@ def run_with_timeout(cmd, env, timeout, retries):
 
     Each attempt runs in its own process group (start_new_session) so a kill also gets
     OpenCode's child processes (bun); otherwise the model outlives the killed parent.
-    timeout <= 0 disables timeout/retry and leaves the terminal to OpenCode directly."""
+    timeout == 0 disables timeout/retry and connects standard streams directly. The child
+    still has its own session for reliable cleanup, so commands must remain non-interactive
+    and must not open /dev/tty."""
     if not timeout or timeout <= 0:
-        proc = subprocess.Popen(cmd, env=env, start_new_session=True)
         try:
-            return proc.wait()
+            proc = subprocess.Popen(cmd, env=env, start_new_session=True)
+        except OSError as exc:
+            log("ERROR: could not start %s: %s" % (cmd[0], exc))
+            return 2
+        try:
+            return _normalise_returncode(proc.wait())
         except BaseException:
             kill_process_group(proc)
             raise
     attempts = retries + 1
     for i in range(1, attempts + 1):
-        rc, produced_output = _one_attempt(cmd, env, timeout)
+        try:
+            rc, produced_output = _one_attempt(cmd, env, timeout)
+        except OSError as exc:
+            log("ERROR: could not start %s: %s" % (cmd[0], exc))
+            return 2
         if rc is not None:
             return rc
         if produced_output:
@@ -285,7 +363,7 @@ def run(task, work_dir, key, *, model, base_url, context, max_output,
     #     instructions your normal OpenCode setup carries.
     home = tempfile.mkdtemp(prefix="opencode-minimax-")
     os.makedirs(os.path.join(home, "config"), exist_ok=True)  # empty -> global config off
-    instructions = [system_prompt] if system_prompt and os.path.isfile(system_prompt) else []
+    instructions = [system_prompt] if system_prompt else []
     cfg = {
         "$schema": "https://opencode.ai/config.json",
         "instructions": instructions,
@@ -293,9 +371,9 @@ def run(task, work_dir, key, *, model, base_url, context, max_output,
             "npm": "@ai-sdk/anthropic",
             "options": {
                 "baseURL": base_url,
-                "apiKey": key,  # -> x-api-key header
-                # MiniMax expects a Bearer token; anthropic-version is a required header
-                # of the Messages API.
+                # @ai-sdk/anthropic turns apiKey into x-api-key. MiniMax also expects the
+                # same credential as a Bearer token; anthropic-version is required too.
+                "apiKey": key,
                 "headers": {"Authorization": "Bearer " + key,
                             "anthropic-version": "2023-06-01"},
             },
@@ -305,24 +383,27 @@ def run(task, work_dir, key, *, model, base_url, context, max_output,
             "models": {model: {"limit": {"context": context, "output": max_output}}},
         }},
     }
-    cfg_path = os.path.join(home, "config.json")  # holds the key in clear text -> 0700 temp home
+    # mkdtemp creates the private home with mode 0700; config.json below holds the key.
+    cfg_path = os.path.join(home, "config.json")
     try:
-        os.chmod(home, 0o700)
         with open(cfg_path, "w") as fh:
             json.dump(cfg, fh)
         os.chmod(cfg_path, 0o600)
         scratch = os.path.join(home, "tmp")
         os.makedirs(scratch, exist_ok=True)
+        # codereview-ok: Builds need the caller's toolchain/proxy environment; the documented
+        # sandbox confines writes, not reads or inherited credentials (2026-08-20).
         env = dict(os.environ,
                    OPENCODE_CONFIG=cfg_path,
                    XDG_CONFIG_HOME=os.path.join(home, "config"),
                    XDG_DATA_HOME=os.path.join(home, "data"),
                    XDG_CACHE_HOME=os.path.join(home, "cache"),
                    XDG_STATE_HOME=os.path.join(home, "state"),
-                   # Every tool's scratch files land inside this run's own temp home, which
-                   # goes away with it. Under --sandbox that home and --dir are the only
-                   # writable places, so a redirected TMPDIR is what keeps tools working
-                   # without opening up the shared system temp dirs.
+                   # Tools that honour TMPDIR/TMP/TEMP write scratch files inside this run's
+                   # temp home. macOS confstr paths deliberately remain closed: opening them
+                   # would expose other processes' shared temp/cache files to writes.
+                   # codereview-ok: Keep that stricter boundary and document the limitation
+                   # instead of weakening write confinement (2026-08-20).
                    TMPDIR=scratch, TMP=scratch, TEMP=scratch)
         if not uses_default_base_url(base_url):
             # Even when the custom provider uses its explicit key-command value,
@@ -339,8 +420,12 @@ def run(task, work_dir, key, *, model, base_url, context, max_output,
                 return 2
             # realpath: the temp home lives under /var/folders, which is a symlink to
             # /private/var/folders — seatbelt only understands the resolved path.
-            profile = build_seatbelt_profile(
-                [os.path.realpath(work_dir), os.path.realpath(home)])
+            try:
+                profile = build_seatbelt_profile(
+                    [os.path.realpath(work_dir), os.path.realpath(home)])
+            except ValueError as exc:
+                log("ERROR: cannot build sandbox profile: %s" % exc)
+                return 2
             prof_path = os.path.join(home, "profile.sb")
             with open(prof_path, "w") as pf:
                 pf.write(profile)
@@ -384,28 +469,55 @@ def main(argv=None):
                          "--base-url; default MiniMax endpoint also tries $MINIMAX_API_KEY)")
     ap.add_argument("--variant", help="OpenCode agent variant (optional)")
     args = ap.parse_args(argv)
-    install_termination_handlers()  # so an abort takes OpenCode and the key file with it
-
+    if not os.path.isdir(args.dir):
+        ap.error("--dir does not exist: %s" % args.dir)
+    args.dir = os.path.realpath(args.dir)
+    forbidden_dirs = {os.path.realpath(os.sep), os.path.realpath(os.path.expanduser("~"))}
+    if args.dir in forbidden_dirs:
+        ap.error("--dir must not be the filesystem root or your home directory: %s" % args.dir)
+    if args.retries < 0:
+        ap.error("--retries must be at least 0")
+    if args.timeout < 0:
+        ap.error("--timeout must be at least 0")
+    if args.context <= 0:
+        ap.error("--context must be greater than 0")
+    if args.max_output <= 0:
+        ap.error("--max-output must be greater than 0")
+    if args.system_prompt:
+        args.system_prompt = os.path.abspath(args.system_prompt)
+        if not os.path.isfile(args.system_prompt):
+            ap.error("--system-prompt does not exist or is not a file: %s" % args.system_prompt)
+    if args.sandbox and sys.platform != "darwin":
+        ap.error("--sandbox uses macOS seatbelt; use bubblewrap/firejail on this platform")
+    if shutil.which("opencode") is None:
+        log("ERROR: opencode was not found on PATH; install it and run 'opencode --version'")
+        return 2
+    if args.sandbox and shutil.which("sandbox-exec") is None:
+        log("ERROR: sandbox-exec was not found on PATH")
+        return 2
     task = args.task if args.task is not None else sys.stdin.read().strip()
     if not task:
         ap.error("no task given (pass it as an argument or via stdin)")
-    if not os.path.isdir(args.dir):
-        ap.error("--dir does not exist: %s" % args.dir)
-    key = get_api_key(args.key_command, args.base_url)
-    if not key:
-        if uses_default_base_url(args.base_url):
-            log("ERROR: no API key. Set MINIMAX_API_KEY, pass --key-command, or (macOS) "
-                "store it in the Keychain: security add-generic-password -a \"$USER\" "
-                "-s minimax-api-key -w")
-        else:
-            log("ERROR: a custom --base-url requires an explicit provider credential via "
-                "--key-command; MINIMAX_API_KEY and the MiniMax Keychain entry are ignored")
-        return 2
-    return run(task, args.dir, key,
-               model=args.model, base_url=args.base_url, context=args.context,
-               max_output=args.max_output, system_prompt=args.system_prompt,
-               timeout=args.timeout, retries=args.retries, sandbox=args.sandbox,
-               variant=args.variant)
+
+    previous_handlers = install_termination_handlers()
+    try:
+        key = get_api_key(args.key_command, args.base_url)
+        if not key:
+            if uses_default_base_url(args.base_url):
+                log("ERROR: no API key. Set MINIMAX_API_KEY, pass --key-command, or (macOS) "
+                    "store it in the Keychain: security add-generic-password -a \"$USER\" "
+                    "-s minimax-api-key -U -w")
+            else:
+                log("ERROR: a custom --base-url requires an explicit provider credential via "
+                    "--key-command; MINIMAX_API_KEY and the MiniMax Keychain entry are ignored")
+            return 2
+        return run(task, args.dir, key,
+                   model=args.model, base_url=args.base_url, context=args.context,
+                   max_output=args.max_output, system_prompt=args.system_prompt,
+                   timeout=args.timeout, retries=args.retries, sandbox=args.sandbox,
+                   variant=args.variant)
+    finally:
+        restore_termination_handlers(previous_handlers)
 
 
 if __name__ == "__main__":

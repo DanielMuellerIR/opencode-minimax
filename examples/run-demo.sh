@@ -4,16 +4,17 @@
 # It copies the tiny demo project to a throwaway directory (your repo stays untouched),
 # runs the agent confined to that directory, and shows the before/after.
 #
-# Requires: opencode on PATH, and a MiniMax API key. Set $MINIMAX_API_KEY, or (macOS) store it
+# Requires: opencode and git on PATH, and a MiniMax API key. Set $MINIMAX_API_KEY, or (macOS) store it
 # once in the Keychain and the tool finds it automatically:
-#   security add-generic-password -a "$USER" -s minimax-api-key -w
+#   security add-generic-password -a "$USER" -s minimax-api-key -U -w
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 work="$(mktemp -d)/demo"
 mkdir -p "$work"
 cp "$here/demo-project/"*.py "$work/"
-( cd "$work" && git init -q && git add -A && git commit -qm demo )
+( cd "$work" && git init -q && git add -A &&
+  git -c user.name=opencode-minimax-demo -c user.email=demo@example.invalid commit -qm demo )
 
 echo "== before: the test fails =="
 ( cd "$work" && python3 test_calc.py ) || true
@@ -21,14 +22,7 @@ echo
 
 echo "== delegating the fix to MiniMax =="
 task="Fix average() in calc.py: return 0.0 on empty input instead of raising. Keep it minimal; do not touch test_calc.py."
-if [ "$(uname -s)" = "Darwin" ]; then
-  # macOS: --sandbox confines writes to the demo directory at the operating-system level.
-  python3 "$here/../minimax_agent.py" --dir "$work" --sandbox "$task"
-else
-  # Elsewhere --sandbox uses the macOS seatbelt and would abort the run, so it is left out.
-  # The demo is still safe: it works on a throwaway copy, not on your files.
-  python3 "$here/../minimax_agent.py" --dir "$work" "$task"
-fi
+"$here/_run-agent.sh" --dir "$work" "$task"
 echo
 
 echo "== the change the agent made =="

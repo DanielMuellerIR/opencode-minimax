@@ -9,3 +9,4 @@ venv/
 
 # OS
 .DS_Store
+.pytest_cache/

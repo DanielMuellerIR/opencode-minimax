@@ -27,6 +27,8 @@ starten nur kurze lokale Hilfsprozesse.
 - [AGENTS.md](AGENTS.md) — Projektprofil, Arbeitsregeln und dieses Datei-Verzeichnis.
 - [README.de.md](README.de.md) — Projekt-Einstieg und Nutzerdokumentation.
 - [README.md](README.md) — Projekt-Einstieg und Nutzerdokumentation.
-- [system-prompt.md](system-prompt.md) — Projektdokumentation.
+- [minimax_agent.py](minimax_agent.py) — CLI-Einstieg, OpenCode-Konfiguration und Prozessaufsicht.
+- [system-prompt.md](system-prompt.md) — Instruktionen, die der Wrapper in jeden Agentenlauf lädt.
+- `tests/` — Isolierte Regressionstests für CLI, Sandbox, Prozesse und Dokumentation.
 - `examples/` — Projektbestandteil; Details stehen im Code bzw. in der verlinkten Dokumentation.
 <!-- /directory-structure -->

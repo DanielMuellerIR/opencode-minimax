@@ -17,7 +17,7 @@ its own work. You review the result and keep it or throw it away.
 2. **Store the key once** in your macOS Keychain (encrypted persistent storage; see the
    temporary runtime-file note below):
    ```bash
-   security add-generic-password -a "$USER" -s minimax-api-key -w   # paste the key; input stays hidden
+   security add-generic-password -a "$USER" -s minimax-api-key -U -w   # paste the key; input stays hidden
    ```
 3. Clone this repo and watch it fix a bug for you:
    ```bash
@@ -49,8 +49,8 @@ You need three things:
    **Store it securely (recommended, macOS).** Keep the persistent copy in your Keychain —
    it stays encrypted at rest and out of your shell history:
    ```bash
-   # Prompts for the key; paste it in — the input stays hidden. (-U updates an existing entry.)
-   security add-generic-password -a "$USER" -s minimax-api-key -w
+   # Prompts for the key; paste it in — the input stays hidden; -U also updates an old entry.
+   security add-generic-password -a "$USER" -s minimax-api-key -U -w
    ```
    That's all — the tool and the example scripts read the key from the Keychain automatically.
 
@@ -90,7 +90,7 @@ What you'll see (real output, lightly trimmed):
 $ python3 test_calc.py
 FAIL: ZeroDivisionError: division by zero
 
-$ minimax_agent.py --dir ./demo --sandbox \
+$ python3 ./minimax_agent.py --dir ./demo --sandbox \
     "Fix average(): return 0.0 on empty input instead of raising. Keep it minimal."
 -> MiniMax agentic: model MiniMax-M3, dir ./demo [sandboxed]
 → Read calc.py
@@ -123,12 +123,14 @@ examples/fix-in-sandbox.sh /path/to/your/repo "Fix the crash when the input list
 
 Both example scripts pick the right degree of confinement for your platform: on macOS they
 add `--sandbox`, elsewhere they run the same task without it (see [Good to know](#good-to-know)).
+They copy committed `HEAD`, not uncommitted changes, and stop with a clear error when the source
+repository is dirty. Commit the exact state you want reviewed or changed before invoking them.
 
 Or call the tool directly:
 
 ```bash
 # --sandbox is macOS-only; on other systems drop it and work in a throwaway copy.
-minimax_agent.py --dir ./my-project --sandbox "Add a --verbose flag to cli.py."
+python3 ./minimax_agent.py --dir ./my-project --sandbox "Add a --verbose flag to cli.py."
 ```
 
 The single biggest thing that makes delegation work well is **describing the task clearly**
@@ -136,7 +138,7 @@ The single biggest thing that makes delegation work well is **describing the tas
 [task templates](examples/briefs) for the shape of a good request. You can pipe one in:
 
 ```bash
-minimax_agent.py --dir ./my-project --sandbox < examples/briefs/fix-failing-test.md
+python3 ./minimax_agent.py --dir ./my-project --sandbox < examples/briefs/fix-failing-test.md
 ```
 
 ## The hands-off way: drive it from your AI assistant
@@ -150,33 +152,12 @@ this tool. You just describe what you want in plain language:
 > "Implement the CSV export in `exporter.py`. Delegate the implementation to MiniMax, then
 > show me the diff."
 
-To make your assistant do this on its own, paste an instruction like the following into its
-project instructions — `CLAUDE.md`, `AGENTS.md`, a system prompt, or a custom-instructions
-field — and adjust the path:
-
-```markdown
-## Delegating implementation to MiniMax
-For well-specified implementation work (new code, refactors, mechanical edits, bulk changes),
-delegate to MiniMax instead of writing it yourself, to save frontier tokens:
-
-1. Write a precise brief: goal, files, success criterion, style, and what not to touch.
-2. Make a throwaway git worktree of the target repo:  git worktree add -f <wt> HEAD
-3. Run according to the host platform (or pipe the brief in via stdin):
-   - macOS:  python3 /path/to/opencode-minimax/minimax_agent.py --dir <wt> --sandbox "<brief>"
-   - Linux/non-macOS: run the same command without --sandbox inside the throwaway worktree.
-     If an approved bubblewrap/firejail wrapper exists, use it for OS-level confinement.
-     The worktree protects the original checkout but is not an OS sandbox.
-4. Read the resulting  git -C <wt> diff , check correctness, scope and style, then merge.
-   Never blind-merge machine output.
-5. Remove the worktree when done.
-
-Keep planning, correctness-critical, and security-sensitive work for yourself.
-```
-
+The canonical ready-to-paste instruction lives in
+[`examples/assistant-instructions.md`](examples/assistant-instructions.md). Put that text in
+your assistant's `CLAUDE.md`, `AGENTS.md`, system prompt, or custom-instructions field and
+adjust the path. Keeping one canonical copy prevents the three variants from drifting apart.
 After that, "do X and delegate the implementation to MiniMax" is enough — your assistant runs
-the tool, reviews the diff, and reports back. This snippet is just a portable version of the
-same rule an experienced user keeps in their assistant's config. It is also available as a
-ready-to-paste file: [`examples/assistant-instructions.md`](examples/assistant-instructions.md).
+the tool, reviews the diff, and reports back.
 
 ## Staying safe
 
@@ -185,7 +166,9 @@ this for you:
 
 - **Reviews** run against a **throwaway copy** of your repo, so your working tree is out of
   the way. On macOS the review is additionally sandboxed, which is what actually stops a
-  write to the original checkout — the throwaway worktree shares its git directory with it.
+  write to the original checkout — the throwaway worktree shares its Git directory with it.
+  That shared Git directory stays read-only inside the sandbox, so commands such as `git add`
+  or `git commit` fail there by design; the supplied review task only reads and reports.
 - **Fixes** run with `--sandbox` (macOS), which stops the assistant from writing anywhere
   outside the target folder, even by mistake. The only other writable place is the run's own
   temporary directory, which is deleted when the run ends — the temp and cache files of your
@@ -193,6 +176,10 @@ this for you:
 - **Always read the change before you keep it** (`git diff`). Treat the assistant as a fast,
   capable helper whose work you check — not an oracle.
 - Never point `--dir` at your home folder or a broad path.
+- `--sandbox` confines **writes**, not reads, network access, or secrets. OpenCode inherits the
+  caller's environment so delegated builds can find their toolchains, proxies, and credentials.
+  Start the wrapper from an environment that contains only credentials the delegated task may
+  access; the model can also read files that the current account can read.
 
 <details>
 <summary><b>Under the hood — the four setup traps this solves</b> (optional; you don't need
@@ -214,7 +201,10 @@ real cause is the setup. `minimax_agent.py` handles all four for you:
    (`PRAGMA wal_checkpoint`) — before the model runs. This is the classic "MiniMax can't
    write" symptom. The fix: give each run an isolated `XDG_*` home under the system temp
    dir and allow writes to exactly that directory (plus `--dir`) in the sandbox. `TMPDIR`
-   points there too, so tools find scratch space without the shared temp dirs being open.
+   points there too, so tools that honour `TMPDIR` find scratch space without the shared temp
+   dirs being open. macOS APIs that use `DARWIN_USER_TEMP_DIR` or `DARWIN_USER_CACHE_DIR`
+   directly remain read-only under the sandbox; opening those shared directories would also
+   let the agent alter other processes' temporary and cache files.
 3. **Bypass the global config to dodge plugin hangs.** A global `~/.config/opencode` can load
    an `@latest` plugin that revalidates against npm on every start and blocks OpenCode when
    npm is slow. An isolated `XDG_CONFIG_HOME` sidesteps it entirely.
@@ -229,8 +219,18 @@ real cause is the setup. `minimax_agent.py` handles all four for you:
    group (OpenCode plus its `bun` children) before the temporary config is removed;
    otherwise the model keeps editing files after you stopped the wrapper.
 
-The whole thing is one short Python file — about 400 lines including its comments — that you
-can read in one sitting.
+The whole thing is one Python file that you can read in one sitting.
+
+The less common controls are explicit CLI flags:
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--timeout` | `300` | Seconds of output silence; `0` disables timeout and retry. |
+| `--retries` | `1` | Restarts after a silent start; never after output appeared. |
+| `--context` | `1000000` | Context-window limit declared to OpenCode. |
+| `--max-output` | `16384` | Output-token limit declared to OpenCode. |
+| `--system-prompt` | bundled `system-prompt.md` | Instruction file injected into the run. |
+| `--variant` | unset | Optional OpenCode agent variant. |
 
 </details>
 
@@ -244,13 +244,16 @@ at any Anthropic-compatible endpoint and pass `--model` accordingly; check that 
 for the exact model id.
 
 **Key sources.** For the default MiniMax endpoint, the tool looks for the key in this order:
-`--key-command` (a command that prints it), then `$MINIMAX_API_KEY`, then — on macOS — the
-current account's Keychain entry named `minimax-api-key`. A custom `--base-url` requires
+`--key-command` (a command that must print exactly one non-empty line within 30 seconds), then
+`$MINIMAX_API_KEY`, then — on macOS — the current account's Keychain entry named
+`minimax-api-key`. An explicitly supplied key command is authoritative: an error, timeout, or
+multi-line result stops the run instead of falling back to another credential. A custom
+`--base-url` requires
 `--key-command`; the MiniMax environment variable and Keychain fallback are deliberately
 ignored so their credential cannot leak to another provider. Use a provider-specific entry or
 password manager command:
 ```bash
-minimax_agent.py --dir ./my-project --sandbox \
+python3 ./minimax_agent.py --dir ./my-project --sandbox \
   --key-command "security find-generic-password -a \"$USER\" -s my-other-key -w" "..."
 ```
 

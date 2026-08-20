@@ -18,7 +18,7 @@ und behältst es oder verwirfst es.
 2. **Key einmal ablegen** im macOS-Schlüsselbund (verschlüsselte dauerhafte Ablage; Hinweis
    zur temporären Laufzeitdatei weiter unten):
    ```bash
-   security add-generic-password -a "$USER" -s minimax-api-key -w   # Key einfügen; Eingabe bleibt verborgen
+   security add-generic-password -a "$USER" -s minimax-api-key -U -w   # Key einfügen; Eingabe bleibt verborgen
    ```
 3. Dieses Repo klonen und zusehen, wie es einen Bug für dich fixt:
    ```bash
@@ -53,8 +53,8 @@ Du brauchst drei Dinge:
    **Sicher ablegen (empfohlen, macOS).** Die dauerhafte Kopie im Schlüsselbund halten —
    dort bleibt sie verschlüsselt und aus deiner Shell-History heraus:
    ```bash
-   # Fragt nach dem Key; einfügen — die Eingabe bleibt verborgen. (-U aktualisiert einen bestehenden Eintrag.)
-   security add-generic-password -a "$USER" -s minimax-api-key -w
+   # Fragt nach dem Key; einfügen — die Eingabe bleibt verborgen; -U aktualisiert auch einen alten Eintrag.
+   security add-generic-password -a "$USER" -s minimax-api-key -U -w
    ```
    Das war's — das Tool und die Beispielskripte lesen den Key automatisch aus dem Schlüsselbund.
 
@@ -95,7 +95,7 @@ Was du siehst (echte Ausgabe, leicht gekürzt):
 $ python3 test_calc.py
 FAIL: ZeroDivisionError: division by zero
 
-$ minimax_agent.py --dir ./demo --sandbox \
+$ python3 ./minimax_agent.py --dir ./demo --sandbox \
     "Fix average(): return 0.0 on empty input instead of raising. Keep it minimal."
 -> MiniMax agentic: model MiniMax-M3, dir ./demo [sandboxed]
 → Read calc.py
@@ -128,12 +128,15 @@ examples/fix-in-sandbox.sh /pfad/zu/deinem/repo "Fixe den Absturz bei leerer Ein
 
 Beide Beispielskripte wählen die passende Einsperrung für dein System: auf macOS ergänzen sie
 `--sandbox`, sonst läuft dieselbe Aufgabe ohne (siehe [Gut zu wissen](#gut-zu-wissen)).
+Sie kopieren den committeten Stand `HEAD`, keine uncommitteten Änderungen, und brechen bei
+einem schmutzigen Quell-Repo mit einer klaren Meldung ab. Committe vorher genau den Stand, den
+du prüfen oder ändern lassen willst.
 
 Oder das Tool direkt aufrufen:
 
 ```bash
 # --sandbox gibt es nur auf macOS; auf anderen Systemen weglassen und in einer Wegwerf-Kopie arbeiten.
-minimax_agent.py --dir ./mein-projekt --sandbox "Füge cli.py eine --verbose-Option hinzu."
+python3 ./minimax_agent.py --dir ./mein-projekt --sandbox "Füge cli.py eine --verbose-Option hinzu."
 ```
 
 Das Wichtigste für gute Delegation ist eine **klare Aufgabenbeschreibung** — Ziel, wo zu
@@ -142,7 +145,7 @@ suchen ist, woran man „fertig" erkennt und was nicht angefasst werden darf. Di
 hineinpipen:
 
 ```bash
-minimax_agent.py --dir ./mein-projekt --sandbox < examples/briefs/fix-failing-test.md
+python3 ./minimax_agent.py --dir ./mein-projekt --sandbox < examples/briefs/fix-failing-test.md
 ```
 
 ## Der bequeme Weg: aus deinem KI-Assistenten heraus
@@ -156,35 +159,12 @@ starkes Planungsmodell das Denken und die Orchestrierung und reicht die Routine-
 > „Implementiere den CSV-Export in `exporter.py`. Delegier die Implementierung an MiniMax und
 > zeig mir dann den Diff."
 
-Damit dein Assistent das von selbst tut, füge eine Anweisung wie die folgende in seine
-Projekt-Konfiguration ein — `CLAUDE.md`, `AGENTS.md`, einen System-Prompt oder ein
-Custom-Instructions-Feld — und passe den Pfad an:
-
-```markdown
-## Implementierung an MiniMax delegieren
-Für gut spezifizierte Implementierungsarbeit (neuer Code, Refactorings, mechanische Änderungen,
-Massenänderungen) an MiniMax delegieren statt selbst zu schreiben, um Frontier-Tokens zu sparen:
-
-1. Präzises Briefing schreiben: Ziel, Dateien, Erfolgskriterium, Stil, was nicht anzufassen ist.
-2. Wegwerf-Worktree des Ziel-Repos anlegen:  git worktree add -f <wt> HEAD
-3. Passend zur Plattform ausführen (oder das Briefing über stdin hineingeben):
-   - macOS:  python3 /pfad/zu/opencode-minimax/minimax_agent.py --dir <wt> --sandbox "<Briefing>"
-   - Linux/Nicht-macOS: denselben Befehl ohne --sandbox im Wegwerf-Worktree ausführen.
-     Falls ein freigegebener bubblewrap-/firejail-Wrapper vorhanden ist, ihn für die
-     OS-Einsperrung nutzen. Der Worktree schützt den Original-Checkout, ist aber keine
-     OS-Sandbox.
-4. Den resultierenden  git -C <wt> diff  lesen, Korrektheit/Umfang/Stil prüfen, dann übernehmen.
-   Maschinen-Output nie blind mergen.
-5. Worktree danach entfernen.
-
-Planung, korrektheits- und sicherheitskritische Arbeit selbst behalten.
-```
-
-Danach genügt „mach X und delegier die Implementierung an MiniMax" — dein Assistent ruft das
-Tool auf, prüft den Diff und meldet zurück. Dieses Snippet ist nur eine portable Fassung
-derselben Regel, die ein erfahrener Nutzer in der Konfiguration seines Assistenten stehen hat.
-Es liegt auch als fertig einfügbare Datei bereit:
-[`examples/assistant-instructions.md`](examples/assistant-instructions.md).
+Die kanonische, fertig einfügbare Anweisung liegt in
+[`examples/assistant-instructions.md`](examples/assistant-instructions.md). Füge diesen Text in
+`CLAUDE.md`, `AGENTS.md`, einen System-Prompt oder ein Custom-Instructions-Feld deines
+Assistenten ein und passe den Pfad an. Eine kanonische Kopie verhindert, dass drei Varianten
+auseinanderlaufen. Danach genügt „mach X und delegier die Implementierung an MiniMax" — dein
+Assistent ruft das Tool auf, prüft den Diff und meldet zurück.
 
 ## Sicher bleiben
 
@@ -194,7 +174,9 @@ bereits für dich:
 - **Reviews** laufen gegen eine **Wegwerf-Kopie** deines Repos, dein Arbeitsstand ist also
   aus dem Weg. Auf macOS läuft das Review zusätzlich in der Sandbox — erst die verhindert
   wirklich einen Schreibzugriff auf den Original-Checkout, mit dem sich der Wegwerf-Worktree
-  sein Git-Verzeichnis teilt.
+  sein Git-Verzeichnis teilt. Dieses gemeinsame Git-Verzeichnis bleibt in der Sandbox
+  schreibgeschützt; `git add` und `git commit` scheitern dort absichtlich. Der mitgelieferte
+  Review-Auftrag liest und berichtet nur.
 - **Fixes** laufen mit `--sandbox` (macOS): das hindert den Assistenten daran, außerhalb des
   Zielordners zu schreiben — auch versehentlich nicht. Beschreibbar ist sonst nur das eigene
   Temp-Verzeichnis des Laufs, das am Ende gelöscht wird; die Temp- und Cache-Dateien deiner
@@ -202,6 +184,10 @@ bereits für dich:
 - **Sieh dir die Änderung an, bevor du sie behältst** (`git diff`). Behandle den Assistenten
   als schnellen, fähigen Helfer, dessen Arbeit du prüfst — nicht als Orakel.
 - `--dir` niemals auf dein Home-Verzeichnis oder einen breiten Pfad zeigen lassen.
+- `--sandbox` begrenzt **Schreibzugriffe**, nicht Lesezugriffe, Netzverbindungen oder Secrets.
+  OpenCode erbt die Umgebung des Aufrufers, damit delegierte Builds ihre Toolchains, Proxys und
+  Credentials finden. Starte den Wrapper nur mit Umgebungsvariablen, die der delegierte Auftrag
+  lesen darf; das Modell kann außerdem alle für das aktuelle Konto lesbaren Dateien lesen.
 
 <details>
 <summary><b>Unter der Haube — die vier Einrichtungs-Fallen, die das löst</b> (optional; zum
@@ -224,8 +210,11 @@ alle vier für dich:
    stürzt *sofort* ab (`PRAGMA wal_checkpoint`) — noch bevor das Modell läuft. Genau das ist
    das „MiniMax kann nicht schreiben"-Symptom. Die Lösung: jedem Lauf ein isoliertes
    `XDG_*`-Heim unter dem System-Temp geben und in der Sandbox genau dieses Verzeichnis
-   (plus `--dir`) zum Schreiben freigeben. `TMPDIR` zeigt ebenfalls dorthin, damit Werkzeuge
-   Platz für Zwischendateien haben, ohne dass die gemeinsamen Temp-Verzeichnisse offen sind.
+   (plus `--dir`) zum Schreiben freigeben. `TMPDIR` zeigt ebenfalls dorthin, damit Werkzeuge,
+   die `TMPDIR` beachten, Platz für Zwischendateien haben. macOS-APIs, die direkt
+   `DARWIN_USER_TEMP_DIR` oder `DARWIN_USER_CACHE_DIR` verwenden, bleiben in der Sandbox
+   schreibgeschützt; eine Freigabe dieser gemeinsamen Verzeichnisse ließe den Agenten auch
+   Temp- und Cache-Dateien anderer Prozesse verändern.
 3. **Die globale Konfiguration umgehen, um Plugin-Hänger zu vermeiden.** Eine globale
    `~/.config/opencode` kann ein `@latest`-Plugin laden, das bei jedem Start gegen npm
    revalidiert und OpenCode bei langsamem npm blockiert. Ein isoliertes `XDG_CONFIG_HOME`
@@ -242,8 +231,18 @@ alle vier für dich:
    (OpenCode samt `bun`-Kindern), bevor die temporäre Konfiguration gelöscht wird; sonst
    arbeitet das Modell weiter, nachdem man den Wrapper gestoppt hat.
 
-Das Ganze ist eine einzige kurze Python-Datei — rund 400 Zeilen samt Kommentaren —, die man
-in einem Rutsch liest.
+Das Ganze ist eine Python-Datei, die man in einem Rutsch liest.
+
+Die seltener benötigten Einstellungen haben eigene CLI-Schalter:
+
+| Schalter | Standard | Wirkung |
+| --- | --- | --- |
+| `--timeout` | `300` | Sekunden Ausgabestille; `0` schaltet Timeout und Neustart aus. |
+| `--retries` | `1` | Neustarts nach stillem Start; nie nachdem Ausgabe erschien. |
+| `--context` | `1000000` | Gegenüber OpenCode deklariertes Kontextfenster. |
+| `--max-output` | `16384` | Gegenüber OpenCode deklariertes Ausgabe-Tokenlimit. |
+| `--system-prompt` | mitgelieferte `system-prompt.md` | In den Lauf geladene Instruktionsdatei. |
+| `--variant` | nicht gesetzt | Optionale OpenCode-Agentenvariante. |
 
 </details>
 
@@ -257,13 +256,16 @@ einen beliebigen Anthropic-kompatiblen Endpunkt zeigen und `--model` entsprechen
 genaue Modell-ID steht in der Doku des jeweiligen Providers.
 
 **Key-Quellen.** Für den Standard-MiniMax-Endpunkt sucht das Tool in dieser Reihenfolge:
-`--key-command` (ein Kommando, das den Key ausgibt), dann `$MINIMAX_API_KEY`, dann — auf
-macOS — den Eintrag `minimax-api-key` des aktuellen Kontos. Ein eigener `--base-url` verlangt
+`--key-command` (ein Kommando, das binnen 30 Sekunden genau eine nicht leere Zeile ausgeben
+muss), dann `$MINIMAX_API_KEY`, dann — auf macOS — den Eintrag `minimax-api-key` des aktuellen
+Kontos. Ein ausdrücklich gesetztes Key-Kommando ist verbindlich: Fehler, Timeout oder mehrere
+Ausgabezeilen brechen ab, statt auf ein anderes Credential zurückzufallen. Ein eigener
+`--base-url` verlangt
 `--key-command`; MiniMax-Umgebungsvariable und -Schlüsselbund-Fallback werden bewusst ignoriert,
 damit ihr Credential nicht an einen anderen Provider gelangen kann. Dafür einen
 providerspezifischen Eintrag oder Passwort-Manager-Befehl verwenden:
 ```bash
-minimax_agent.py --dir ./mein-projekt --sandbox \
+python3 ./minimax_agent.py --dir ./mein-projekt --sandbox \
   --key-command "security find-generic-password -a \"$USER\" -s mein-anderer-key -w" "..."
 ```
 
