@@ -271,6 +271,24 @@ python3 ./minimax_agent.py --dir ./mein-projekt --sandbox \
 
 </details>
 
+## Einordnung nach dem EU AI Act
+
+Dieses Repository ist nach seinem Stand vom 2026-08-24 eine
+Open-Source-Integrationskomponente und kein unter seinem Projektnamen angebotenes
+vollständiges generatives KI-System. Es enthält weder ein Modell noch die
+OpenCode-Laufzeit oder einen gehosteten Endpunkt. Nutzer installieren OpenCode
+separat, wählen einen kompatiblen Modellanbieter, beschaffen eigene
+Zugangsdaten und bleiben Kunden dieser Anbieter. Der Wrapper schreibt nur die
+Konfiguration für diese Kombination, startet OpenCode und überwacht den lokalen
+Prozess.
+
+Diese Einordnung muss erneut geprüft werden, falls das Projekt später Laufzeit
+und Modellzugang bündelt, einen gehosteten Dienst betreibt oder als vollständiges
+KI-System unter einem eigenen Namen oder einer eigenen Marke angeboten wird.
+Grundlagen sind die
+[Leitlinien der EU-Kommission zu Artikel 50](https://digital-strategy.ec.europa.eu/en/policies/guidelines-ai-transparency-obligations)
+und die [Anbieterdefinition des EU AI Act](https://ai-act-service-desk.ec.europa.eu/en/ai-act/article-3).
+
 ## Gut zu wissen
 
 - Gebaut und getestet auf **macOS** mit **OpenCode 1.16–1.17.x**. Die `--sandbox`-Einsperrung

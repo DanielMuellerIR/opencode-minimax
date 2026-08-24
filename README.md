@@ -259,6 +259,21 @@ python3 ./minimax_agent.py --dir ./my-project --sandbox \
 
 </details>
 
+## EU AI Act role
+
+As of 2026-08-24, this repository is an open-source integration component, not a
+complete generative AI system offered under this project's name. It provides no
+model, OpenCode runtime, or hosted endpoint. Users install OpenCode separately,
+choose a compatible model provider, obtain their own API credentials, and remain
+customers of those providers. The wrapper only writes the configuration for that
+combination, starts OpenCode, and supervises the local process.
+
+This classification should be reviewed if the project later bundles the runtime
+and model access, operates a hosted service, or is offered as a complete AI system
+under a separate name or trademark. See the EU Commission's
+[Article 50 guidelines](https://digital-strategy.ec.europa.eu/en/policies/guidelines-ai-transparency-obligations)
+and the AI Act's [provider definition](https://ai-act-service-desk.ec.europa.eu/en/ai-act/article-3).
+
 ## Good to know
 
 - Built and tested on **macOS** with **OpenCode 1.16–1.17.x**. The `--sandbox` confinement is
