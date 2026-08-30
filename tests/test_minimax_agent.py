@@ -232,7 +232,26 @@ class ApiKeyResolutionTests(unittest.TestCase):
             ],
             capture_output=True,
             text=True,
+            timeout=minimax_agent.KEY_COMMAND_TIMEOUT,
         )
+
+    def test_keychain_lookup_timeout_has_no_traceback(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with mock.patch.object(minimax_agent.sys, "platform", "darwin"):
+                with mock.patch.object(
+                    minimax_agent, "get_keychain_account", return_value="test-account"
+                ):
+                    with mock.patch.object(
+                        minimax_agent.subprocess, "run",
+                        side_effect=subprocess.TimeoutExpired("security", 30),
+                    ):
+                        with mock.patch.object(
+                            minimax_agent.sys, "stderr", io.StringIO()
+                        ) as error:
+                            key = minimax_agent.get_api_key(None)
+
+        self.assertIsNone(key)
+        self.assertIn("Keychain lookup did not finish", error.getvalue())
 
     def test_main_stops_custom_url_before_agent_run_with_implicit_key(self):
         before = {sig: signal.getsignal(sig) for sig in (signal.SIGTERM, signal.SIGHUP)}

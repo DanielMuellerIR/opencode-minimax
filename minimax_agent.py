@@ -118,10 +118,18 @@ def get_api_key(key_command, base_url=DEFAULT_BASE_URL):
         account = get_keychain_account()
         if not account:
             return None
-        r = subprocess.run(
-            ["security", "find-generic-password", "-a", account,
-             "-s", DEFAULT_KEYCHAIN_SERVICE, "-w"],
-            capture_output=True, text=True)
+        try:
+            r = subprocess.run(
+                ["security", "find-generic-password", "-a", account,
+                 "-s", DEFAULT_KEYCHAIN_SERVICE, "-w"],
+                capture_output=True, text=True, timeout=KEY_COMMAND_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            log("ERROR: macOS Keychain lookup did not finish within %d seconds"
+                % KEY_COMMAND_TIMEOUT)
+            return None
+        except OSError as exc:
+            log("ERROR: could not start macOS Keychain lookup: %s" % exc)
+            return None
         key = (r.stdout or "").strip()
         if key:
             log("using API key from the macOS Keychain (account '%s', service '%s')"
@@ -141,7 +149,7 @@ def build_seatbelt_profile(write_dirs):
     """macOS seatbelt profile: allow everything EXCEPT writing; permit writes only under
     write_dirs plus a few harmless device files.
 
-    Callers pass exactly two directories: the work dir and this run's private temp home
+    Callers pass exactly two directories: the work dir and this run's writable runtime tree
     (see run(), which also points TMPDIR/TMP/TEMP at it). The system temp dirs as a whole
     are deliberately NOT writable — that would let a confined run change or delete the
     scratch and cache files of every other process running under the same account, which
