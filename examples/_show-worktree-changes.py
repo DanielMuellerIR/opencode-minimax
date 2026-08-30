@@ -31,6 +31,7 @@ def main():
         "PATH": os.environ.get("PATH", os.defpath),
         "GIT_CONFIG_NOSYSTEM": "1",
         "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_OPTIONAL_LOCKS": "0",
         "LC_ALL": "C",
     }
     common = [
@@ -40,27 +41,48 @@ def main():
         "-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false",
     ]
 
+    # Stream an arbitrarily large agent-written diff instead of holding it in this trusted
+    # review process's memory.
     diff = subprocess.run(
         common + ["diff", "--no-ext-diff", "--no-textconv", args.base, "--"],
-        env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        env=env,
     )
     if diff.returncode not in (0, 1):
-        sys.stderr.buffer.write(diff.stderr)
         return 2
-    sys.stdout.buffer.write(diff.stdout)
 
-    status = subprocess.run(
+    status = subprocess.Popen(
         common + ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
-        env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        env=env, stdout=subprocess.PIPE,
     )
-    if status.returncode != 0:
-        sys.stderr.buffer.write(status.stderr)
-        return 2
-    records = [os.fsdecode(item) for item in status.stdout.split(b"\0") if item]
     print("\n== complete machine-readable status (JSON; includes untracked files) ==")
-    # ASCII escaping preserves undecodable filename bytes instead of making stdout encoding
-    # decide whether the safety report itself succeeds.
-    print(json.dumps(records, ensure_ascii=True, indent=2))
+    print("[")
+    first = True
+    pending = b""
+    while True:
+        chunk = status.stdout.read(65536)
+        if not chunk:
+            break
+        items = (pending + chunk).split(b"\0")
+        pending = items.pop()
+        for item in items:
+            if not item:
+                continue
+            # ASCII escaping preserves undecodable filename bytes instead of making stdout
+            # encoding decide whether the safety report itself succeeds.
+            prefix = "  " if first else ",\n  "
+            sys.stdout.write(prefix + json.dumps(os.fsdecode(item), ensure_ascii=True))
+            first = False
+    if pending:
+        status.kill()
+        status.wait()
+        print("\n]")
+        print("ERROR: git status returned a record without its NUL terminator", file=sys.stderr)
+        return 2
+    status.stdout.close()
+    status_rc = status.wait()
+    print("\n]")
+    if status_rc != 0:
+        return 2
     return 0
 
 

@@ -35,7 +35,7 @@ echo "== the change the agent made =="
 show_worktree_changes
 echo
 
-echo "The generated code has not been executed outside the agent sandbox."
+echo "This outer demo has not executed the generated code yet."
 if [ -t 0 ]; then
   printf "After reviewing the change above, run its test now? [y/N] "
   read -r answer

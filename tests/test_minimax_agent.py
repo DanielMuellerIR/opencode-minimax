@@ -995,12 +995,15 @@ class ExampleScriptTests(unittest.TestCase):
                 "--work-tree", str(work), "--base", base,
             ], env=env, capture_output=True, text=True, timeout=10)
             escaped_exists = escaped.exists()
+            helper_text = helper.read_text(encoding="utf-8")
 
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("-base", proc.stdout)
         self.assertIn("+changed", proc.stdout)
         self.assertIn('"?? new.txt"', proc.stdout)
         self.assertFalse(escaped_exists, "agent-controlled external diff ran outside")
+        self.assertIn('"GIT_OPTIONAL_LOCKS": "0"', helper_text)
+        self.assertNotIn("env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE", helper_text)
 
     def test_supervisor_forwards_sigterm_to_the_agent_child(self):
         marker = _marker()
