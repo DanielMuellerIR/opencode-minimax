@@ -1136,6 +1136,8 @@ class DocumentationTests(unittest.TestCase):
                     self.assertIn("| `%s` |" % flag, text)
                 self.assertIn("DARWIN_USER_TEMP_DIR", text)
                 self.assertIn("DARWIN_USER_CACHE_DIR", text)
+                self.assertIn("absolute", text)
+                self.assertNotIn("$ examples/_show-worktree-changes.py", text)
 
     def test_all_documented_keychain_writes_update_existing_entries(self):
         for path in (REPO / "README.md", REPO / "README.de.md",

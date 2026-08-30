@@ -104,7 +104,7 @@ $ python3 ./minimax_agent.py --dir ./demo --sandbox \
 $ python3 test_calc.py         # das Modell verifiziert seinen eigenen Fix
 OK
 
-$ examples/_show-worktree-changes.py ...
+== die Änderung des Agenten ==
  def average(numbers):
      # Return the mean of a list of numbers.
 +    if not numbers:
@@ -298,9 +298,10 @@ und die [Anbieterdefinition des EU AI Act](https://ai-act-service-desk.ec.europa
 ## Gut zu wissen
 
 - Gebaut und getestet auf **macOS** mit **OpenCode 1.16–1.17.x**. Die `--sandbox`-Einsperrung
-  ist macOS-only; unter Linux den Assistenten gegen einen wegwerfbaren git-Worktree laufen
-  lassen, den man revertieren kann (das tun die Beispiele), oder mit `bubblewrap`/`firejail`
-  umschließen.
+  gibt es nur dort. Unter Linux trennen die Beispiele mit einem Wegwerf-Worktree lediglich
+  die Arbeitsdateien; das ist keine Betriebssystem-Sandbox: Der Agent erreicht weiterhin
+  gemeinsame Git-Metadaten und absolute Pfade. Für erzwungene Einsperrung ein freigegebenes
+  `bubblewrap`-/`firejail`-Setup verwenden.
 - OpenCode entwickelt sich schnell. Als **funktionierendes Rezept** verstehen, nicht als
   gepflegtes Produkt — ändert eine künftige OpenCode-Version das Verhalten, das kurze Skript
   lesen und anpassen.

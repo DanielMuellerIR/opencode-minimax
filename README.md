@@ -99,7 +99,7 @@ $ python3 ./minimax_agent.py --dir ./demo --sandbox \
 $ python3 test_calc.py         # the model verifies its own fix
 OK
 
-$ examples/_show-worktree-changes.py ...
+== the change the agent made ==
  def average(numbers):
      # Return the mean of a list of numbers.
 +    if not numbers:
@@ -282,8 +282,9 @@ and the AI Act's [provider definition](https://ai-act-service-desk.ec.europa.eu/
 ## Good to know
 
 - Built and tested on **macOS** with **OpenCode 1.16–1.17.x**. The `--sandbox` confinement is
-  macOS-only; on Linux, run the assistant against a throwaway git worktree you can revert
-  (the examples do this), or wrap it with `bubblewrap`/`firejail`.
+  macOS-only. On Linux, the examples use a throwaway worktree to separate working files, but
+  that is not an OS sandbox: the agent can still reach shared Git metadata and absolute paths.
+  Use an approved `bubblewrap`/`firejail` setup when you need enforced confinement.
 - OpenCode changes quickly. Treat this as a **working recipe**, not a maintained product — if
   a future OpenCode release changes behavior, read the short script and adjust.
 - Many MiniMax plans have a **rolling usage window**; when you exceed it you get a generic
