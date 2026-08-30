@@ -989,12 +989,15 @@ class ExampleScriptTests(unittest.TestCase):
                 ["git", "-C", str(repo), "config", "diff.external", str(evil)], check=True
             )
             env = dict(os.environ, ESCAPED=str(escaped))
+            index = Path(git_dir) / "index"
+            index_mtime_before = index.stat().st_mtime_ns
 
             proc = subprocess.run([
                 sys.executable, str(helper), "--git-dir", git_dir,
                 "--work-tree", str(work), "--base", base,
             ], env=env, capture_output=True, text=True, timeout=10)
             escaped_exists = escaped.exists()
+            index_mtime_after = index.stat().st_mtime_ns
             helper_text = helper.read_text(encoding="utf-8")
 
         self.assertEqual(proc.returncode, 0, proc.stderr)
@@ -1002,6 +1005,8 @@ class ExampleScriptTests(unittest.TestCase):
         self.assertIn("+changed", proc.stdout)
         self.assertIn('"?? new.txt"', proc.stdout)
         self.assertFalse(escaped_exists, "agent-controlled external diff ran outside")
+        self.assertEqual(index_mtime_after, index_mtime_before,
+                         "sichere Auswertung schrieb den echten Quellindex")
         self.assertIn('"GIT_OPTIONAL_LOCKS": "0"', helper_text)
         self.assertNotIn("env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE", helper_text)
 
