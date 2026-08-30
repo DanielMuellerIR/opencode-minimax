@@ -1154,6 +1154,8 @@ class DocumentationTests(unittest.TestCase):
         self.assertIn("[minimax_agent.py](minimax_agent.py)", agents)
         self.assertIn("`tests/`", agents)
         self.assertIn("Instruktionen, die der Wrapper", agents)
+        self.assertIn("keine Betriebssystem-Sandbox", agents)
+        self.assertIn("examples/_run-agent.sh", agents)
 
 
 if __name__ == "__main__":

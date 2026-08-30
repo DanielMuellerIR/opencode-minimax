@@ -21,6 +21,14 @@ python3 tests/test_minimax_agent.py   # dieselbe Datei direkt aufgerufen
 Kein Test ruft die MiniMax-API oder OpenCode auf; die Prozess- und Sandbox-Tests
 starten nur kurze lokale Hilfsprozesse.
 
+## Sicherheitsvertrag der Plattformzweige
+
+- Ein Wegwerf-Worktree trennt Arbeitsdateien, ist aber keine Betriebssystem-Sandbox und
+  teilt Git-Metadaten mit dem Quell-Repo. Nur eine ausdrücklich genannte Seatbelt-,
+  `bubblewrap`- oder `firejail`-Grenze darf als erzwungene Einsperrung bezeichnet werden.
+- Änderungen an der Plattformverzweigung in `examples/_run-agent.sh` müssen beide READMEs,
+  `examples/assistant-instructions.md` und die zugehörigen Regressionstests gemeinsam prüfen.
+
 ## Verzeichnisstruktur
 
 <!-- directory-structure: generated -->
