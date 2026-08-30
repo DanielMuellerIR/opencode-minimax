@@ -38,7 +38,7 @@ DEFAULT_BASE_URL = "https://api.minimax.io/anthropic/v1"  # @ai-sdk/anthropic ap
 DEFAULT_CONTEXT = 1_000_000
 DEFAULT_MAX_OUTPUT = 16_384
 DEFAULT_TIMEOUT = 300
-DEFAULT_RETRIES = 1
+DEFAULT_RETRIES = 0
 KEY_COMMAND_TIMEOUT = 30
 DEFAULT_SYSTEM_PROMPT = os.path.join(_HERE, "system-prompt.md")
 DEFAULT_KEYCHAIN_SERVICE = "minimax-api-key"  # macOS Keychain fallback (see get_api_key)
@@ -76,18 +76,31 @@ def get_api_key(key_command, base_url=DEFAULT_BASE_URL):
     credentials must be selected explicitly rather than inheriting a MiniMax key.
     """
     if key_command:
+        proc = None
         try:
-            r = subprocess.run(key_command, shell=True, capture_output=True, text=True,
-                               timeout=KEY_COMMAND_TIMEOUT)
+            proc = subprocess.Popen(
+                key_command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, start_new_session=True,
+            )
+            stdout, _stderr = proc.communicate(timeout=KEY_COMMAND_TIMEOUT)
         except subprocess.TimeoutExpired:
+            kill_process_group(proc)
+            proc.communicate()
             log("ERROR: key-command did not finish within %d seconds" % KEY_COMMAND_TIMEOUT)
             return None
-        if r.returncode != 0:
-            detail = " ".join((r.stderr or "").split())[:300]
-            log("ERROR: key-command failed with exit code %d%s"
-                % (r.returncode, ": " + detail if detail else ""))
+        except OSError as exc:
+            log("ERROR: could not start key-command: %s" % exc)
             return None
-        lines = [line.strip() for line in (r.stdout or "").splitlines() if line.strip()]
+        except BaseException:
+            if proc is not None:
+                kill_process_group(proc)
+            raise
+        if proc.returncode != 0:
+            # Credential helpers may put the key itself into diagnostics. Their stderr is
+            # captured so it cannot leak into this wrapper's terminal or caller logs.
+            log("ERROR: key-command failed with exit code %d" % proc.returncode)
+            return None
+        lines = [line.strip() for line in (stdout or "").splitlines() if line.strip()]
         if len(lines) != 1:
             log("ERROR: key-command must print exactly one non-empty line; got %d" % len(lines))
             return None
@@ -192,9 +205,14 @@ def kill_process_group(proc, grace=5):
     be shot down explicitly, or the model keeps editing files after the abort. SIGTERM
     first so OpenCode can shut down cleanly; whatever survives the grace period gets
     SIGKILL."""
-    if proc.poll() is not None:
-        return
     pgid = proc.pid  # start_new_session=True guarantees PID == process-group ID.
+    proc.poll()       # collect the direct child, but do not mistake that for an empty group
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return
+    except PermissionError:
+        pass
     for sig in (signal.SIGTERM, signal.SIGKILL):
         try:
             os.killpg(pgid, sig)
@@ -277,6 +295,9 @@ def _one_attempt(cmd, env, timeout):
                 while (time.monotonic() < drain_deadline
                        and _drain_ready(selector, sinks, seen, 0)):
                     pass                   # forward bytes already buffered at normal exit
+                # A tool may have inherited this attempt's process group after OpenCode
+                # itself exited. It must not keep editing after we report completion.
+                kill_process_group(proc)
                 return _normalise_returncode(rc), None
             if time.monotonic() - seen["at"] >= timeout:
                 kill_process_group(proc)
@@ -299,21 +320,16 @@ def _one_attempt(cmd, env, timeout):
 
 
 def run_with_timeout(cmd, env, timeout, retries):
-    """Run OpenCode, watching its output so that only a stalled START gets retried.
+    """Run OpenCode while limiting output silence rather than total runtime.
 
-    OpenCode occasionally hangs at session start (a small title/provider-init LLM call
-    blocks) while the API itself is healthy. The stall happens BEFORE the first tool call,
-    i.e. before any file change, so a restart is safe.
-
-    `timeout` therefore limits SILENCE, not the total runtime: a long task keeps running
-    as long as OpenCode keeps printing. Only a run that says nothing for `timeout` seconds
-    is killed — and it is restarted only if it never said anything at all. A run that had
-    already started may have changed files, so it ends with exit code 124 and no retry;
-    review the work dir before running again.
+    Output is not a reliable boundary for tool side effects: a completely silent attempt
+    may already have changed something. Retries are therefore disabled by default. A caller
+    may opt in only when its startup is independently known to be side-effect-free. Once any
+    output appeared, a timeout always returns 124 without retrying.
 
     Each attempt runs in its own process group (start_new_session) so a kill also gets
     OpenCode's child processes (bun); otherwise the model outlives the killed parent.
-    timeout == 0 disables timeout/retry and connects standard streams directly. The child
+    timeout == 0 disables timeout and retry and connects standard streams directly. The child
     still has its own session for reliable cleanup, so commands must remain non-interactive
     and must not open /dev/tty."""
     if not timeout or timeout <= 0:
@@ -323,7 +339,9 @@ def run_with_timeout(cmd, env, timeout, retries):
             log("ERROR: could not start %s: %s" % (cmd[0], exc))
             return 2
         try:
-            return _normalise_returncode(proc.wait())
+            rc = _normalise_returncode(proc.wait())
+            kill_process_group(proc)
+            return rc
         except BaseException:
             kill_process_group(proc)
             raise
@@ -362,7 +380,10 @@ def run(task, work_dir, key, *, model, base_url, context, max_output,
     #  3) Clean system prompt: inject a short task-focused prompt instead of whatever global
     #     instructions your normal OpenCode setup carries.
     home = tempfile.mkdtemp(prefix="opencode-minimax-")
-    os.makedirs(os.path.join(home, "config"), exist_ok=True)  # empty -> global config off
+    # The credential stays above the writable runtime tree. A sandboxed agent may alter its
+    # XDG state and scratch files, but cannot chmod, replace or retain config.json.
+    runtime = os.path.join(home, "runtime")
+    os.makedirs(os.path.join(runtime, "config"), exist_ok=True)  # empty -> global config off
     instructions = [system_prompt] if system_prompt else []
     cfg = {
         "$schema": "https://opencode.ai/config.json",
@@ -389,16 +410,16 @@ def run(task, work_dir, key, *, model, base_url, context, max_output,
         with open(cfg_path, "w") as fh:
             json.dump(cfg, fh)
         os.chmod(cfg_path, 0o600)
-        scratch = os.path.join(home, "tmp")
+        scratch = os.path.join(runtime, "tmp")
         os.makedirs(scratch, exist_ok=True)
         # codereview-ok: Builds need the caller's toolchain/proxy environment; the documented
         # sandbox confines writes, not reads or inherited credentials (2026-08-20).
         env = dict(os.environ,
                    OPENCODE_CONFIG=cfg_path,
-                   XDG_CONFIG_HOME=os.path.join(home, "config"),
-                   XDG_DATA_HOME=os.path.join(home, "data"),
-                   XDG_CACHE_HOME=os.path.join(home, "cache"),
-                   XDG_STATE_HOME=os.path.join(home, "state"),
+                   XDG_CONFIG_HOME=os.path.join(runtime, "config"),
+                   XDG_DATA_HOME=os.path.join(runtime, "data"),
+                   XDG_CACHE_HOME=os.path.join(runtime, "cache"),
+                   XDG_STATE_HOME=os.path.join(runtime, "state"),
                    # Tools that honour TMPDIR/TMP/TEMP write scratch files inside this run's
                    # temp home. macOS confstr paths deliberately remain closed: opening them
                    # would expose other processes' shared temp/cache files to writes.
@@ -422,7 +443,7 @@ def run(task, work_dir, key, *, model, base_url, context, max_output,
             # /private/var/folders — seatbelt only understands the resolved path.
             try:
                 profile = build_seatbelt_profile(
-                    [os.path.realpath(work_dir), os.path.realpath(home)])
+                    [os.path.realpath(work_dir), os.path.realpath(runtime)])
             except ValueError as exc:
                 log("ERROR: cannot build sandbox profile: %s" % exc)
                 return 2
@@ -432,9 +453,53 @@ def run(task, work_dir, key, *, model, base_url, context, max_output,
             cmd = ["sandbox-exec", "-f", prof_path] + cmd
         log("-> MiniMax agentic: model %s, dir %s%s"
             % (model, work_dir, " [sandboxed]" if sandbox else ""))
-        return run_with_timeout(cmd, env, timeout, retries)
+        result = run_with_timeout(cmd, env, timeout, retries)
     finally:
-        shutil.rmtree(home, ignore_errors=True)
+        cleanup_ok = remove_temp_home(home)
+    if not cleanup_ok:
+        return 2
+    return result
+
+
+def remove_temp_home(home):
+    """Remove one run home even if an unsandboxed child changed its permissions."""
+    def restore_access(_function, path, _exc_info):
+        if os.path.islink(path):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+            return
+        try:
+            os.chmod(path, 0o700)
+        except OSError:
+            return
+        try:
+            if os.path.isdir(path):
+                shutil.rmtree(path, onerror=restore_access)
+            else:
+                os.unlink(path)
+        except OSError:
+            pass
+
+    if os.path.islink(home):
+        try:
+            os.unlink(home)
+        except OSError:
+            pass
+    else:
+        try:
+            os.chmod(home, 0o700)
+        except OSError:
+            pass
+        try:
+            shutil.rmtree(home, onerror=restore_access)
+        except OSError:
+            pass
+    if os.path.lexists(home):
+        log("ERROR: could not remove temporary credential directory: %s" % home)
+        return False
+    return True
 
 
 def main(argv=None):
@@ -458,9 +523,9 @@ def main(argv=None):
                     help="seconds of silence before a stalled run is killed; a run that "
                          "keeps printing is never cut off (0 = off)")
     ap.add_argument("--retries", type=int, default=DEFAULT_RETRIES,
-                    help="restarts after a run that stalled before printing anything "
-                         "(default %d); a run that had already started is never "
-                         "restarted" % DEFAULT_RETRIES)
+                    help="explicit restarts after a completely silent run (default %d); "
+                         "leave disabled unless the task cannot have side effects before "
+                         "its first output" % DEFAULT_RETRIES)
     ap.add_argument("--sandbox", action="store_true",
                     help="macOS only: confine writes/deletes at the OS level to --dir and "
                          "the run's own temp dir (removed when the run ends)")

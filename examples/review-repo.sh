@@ -18,6 +18,7 @@ set -euo pipefail
 
 repo="${1:?usage: review-repo.sh /path/to/your/repo}"
 here="$(cd "$(dirname "$0")" && pwd)"
+source "$here/_example-lib.sh"
 task="Review this repository for real bugs. For each finding give file:line and a concrete fix. Do not change any files."
 
 if [ -n "$(git -C "$repo" status --porcelain)" ]; then
@@ -25,11 +26,14 @@ if [ -n "$(git -C "$repo" status --porcelain)" ]; then
   exit 2
 fi
 wt="$(mktemp -d)/wt"
+work="$wt"
 # Always remove the registered throwaway worktree, even on error or Ctrl-C. The trap is
 # installed before `worktree add`, so an abort immediately after registration is covered.
 trap 'git -C "$repo" worktree remove --force "$wt" 2>/dev/null || true' EXIT
 git -C "$repo" worktree add -f "$wt" HEAD >/dev/null
+trusted_git_dir="$(git -C "$repo" rev-parse --absolute-git-dir)"
+base_commit="$(git -C "$repo" rev-parse HEAD)"
 
 # codereview-ok: The shared Git directory remains read-only intentionally; this task only
 # reads files and reports findings, while the worktree is discarded afterward (2026-08-20).
-"$here/_run-agent.sh" --dir "$wt" "$task"
+run_agent_supervised --dir "$wt" "$task"

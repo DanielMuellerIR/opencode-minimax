@@ -4,8 +4,19 @@
 set -u
 
 here="$(cd "$(dirname "$0")" && pwd)"
-if [ "$(uname -s)" = "Darwin" ]; then
-  exec python3 "$here/../minimax_agent.py" --sandbox "$@"
-else
-  exec python3 "$here/../minimax_agent.py" "$@"
+if ! platform="$(uname -s)"; then
+  echo "ERROR: could not determine the operating system; refusing to run without a sandbox decision" >&2
+  exit 2
 fi
+case "$platform" in
+  Darwin)
+    exec python3 "$here/../minimax_agent.py" --sandbox "$@"
+    ;;
+  Linux)
+    exec python3 "$here/../minimax_agent.py" "$@"
+    ;;
+  *)
+    echo "ERROR: unsupported operating system '$platform'" >&2
+    exit 2
+    ;;
+esac

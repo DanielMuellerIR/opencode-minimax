@@ -104,15 +104,20 @@ $ python3 ./minimax_agent.py --dir ./demo --sandbox \
 $ python3 test_calc.py         # das Modell verifiziert seinen eigenen Fix
 OK
 
-$ git diff
+$ examples/_show-worktree-changes.py ...
  def average(numbers):
      # Return the mean of a list of numbers.
 +    if not numbers:
 +        return 0.0
      return sum(numbers) / len(numbers)
+
+Nach der Prüfung den Test jetzt ausführen? [y/N] y
+OK
 ```
 
-Roter Test → Aufgabe in Worten → kleine, korrekte Änderung → grün. Das ist die ganze Idee.
+Roter Test → Aufgabe in Worten → vollständige Prüfung mit gesperrter Git-Konfiguration →
+erst danach den erzeugten Code ausführen. Das äußere Demo-Skript importiert agentengeschriebenes
+Python erst, wenn du bestätigst, dass du die angezeigte Änderung geprüft hast.
 
 ## Am eigenen Code nutzen
 
@@ -181,8 +186,12 @@ bereits für dich:
   Zielordners zu schreiben — auch versehentlich nicht. Beschreibbar ist sonst nur das eigene
   Temp-Verzeichnis des Laufs, das am Ende gelöscht wird; die Temp- und Cache-Dateien deiner
   anderen Programme bleiben tabu.
-- **Sieh dir die Änderung an, bevor du sie behältst** (`git diff`). Behandle den Assistenten
-  als schnellen, fähigen Helfer, dessen Arbeit du prüfst — nicht als Orakel.
+- **Prüfe die vollständige Änderung, bevor du sie behältst oder ausführst.** Fix- und
+  Demo-Skript vergleichen alle getrackten Dateien mit dem vor dem Lauf erfassten Basisstand,
+  deaktivieren externe Diffs und Textkonvertierung, ignorieren die beschreibbare `.git`-Datei
+  des Worktrees und listen ungetrackte Dateien in einem maschinenlesbaren Statusblock.
+  Behandle den Assistenten als schnellen, fähigen Helfer, dessen Arbeit du prüfst — nicht als
+  Orakel.
 - `--dir` niemals auf dein Home-Verzeichnis oder einen breiten Pfad zeigen lassen.
 - `--sandbox` begrenzt **Schreibzugriffe**, nicht Lesezugriffe, Netzverbindungen oder Secrets.
   OpenCode erbt die Umgebung des Aufrufers, damit delegierte Builds ihre Toolchains, Proxys und
@@ -219,17 +228,14 @@ alle vier für dich:
    `~/.config/opencode` kann ein `@latest`-Plugin laden, das bei jedem Start gegen npm
    revalidiert und OpenCode bei langsamem npm blockiert. Ein isoliertes `XDG_CONFIG_HOME`
    umgeht das komplett.
-4. **Nur einen hängenden Start abbrechen — keine lange Aufgabe.** OpenCode hängt gelegentlich
-   beim Session-Start (ein kleiner Titel-/Provider-Init-Call), während die API selbst gesund
-   ist. Der Hänger liegt vor dem ersten Tool-Call, ein Neustart ist also gefahrlos. Der
-   Wrapper beobachtet OpenCodes Ausgabe und zählt nur *Stille*: Ein Lauf, der weiter etwas
-   ausgibt, wird nie abgeschnitten, egal wie lange er dauert; neu gestartet wird nur ein
-   Lauf, der überhaupt nichts ausgegeben hat. Verstummt ein Lauf, der schon angefangen hatte,
-   wird er ohne Neustart beendet (Exit-Code 124) — sonst setzte ein zweiter Versuch auf einem
-   halbfertigen Arbeitsverzeichnis auf. Jeder Versuch läuft in einer eigenen Prozessgruppe,
-   und jeder Abbruch (Timeout, Strg-C, `SIGTERM`, `SIGHUP`) beendet diese ganze Gruppe
-   (OpenCode samt `bun`-Kindern), bevor die temporäre Konfiguration gelöscht wird; sonst
-   arbeitet das Modell weiter, nachdem man den Wrapper gestoppt hat.
+4. **Stille begrenzen, ohne Arbeitsbeginn zu erraten.** Der Wrapper zählt Ausgabestille,
+   nicht die Gesamtlaufzeit: Solange ein Lauf etwas ausgibt, wird er nicht abgeschnitten.
+   Auch ein stiller Versuch kann bereits ein Werkzeug mit Nebenwirkung gestartet haben;
+   automatische Neustarts sind deshalb standardmäßig aus. `--retries` ist eine ausdrückliche
+   Option nur für Aufgaben, deren Start keine Nebenwirkungen haben kann. Jeder Versuch läuft
+   in einer eigenen Prozessgruppe. Bei Ende oder Abbruch — Timeout, Strg-C, `SIGTERM`,
+   `SIGHUP` oder ein bereits beendeter OpenCode-Elternprozess — entfernt der Wrapper übrige
+   Nachfahren, bevor er die temporäre Konfiguration löscht.
 
 Das Ganze ist eine Python-Datei, die man in einem Rutsch liest.
 
@@ -238,7 +244,7 @@ Die seltener benötigten Einstellungen haben eigene CLI-Schalter:
 | Schalter | Standard | Wirkung |
 | --- | --- | --- |
 | `--timeout` | `300` | Sekunden Ausgabestille; `0` schaltet Timeout und Neustart aus. |
-| `--retries` | `1` | Neustarts nach stillem Start; nie nachdem Ausgabe erschien. |
+| `--retries` | `0` | Ausdrückliche Neustarts nach völlig stillem Lauf; nur für nebenwirkungsfreie Starts. |
 | `--context` | `1000000` | Gegenüber OpenCode deklariertes Kontextfenster. |
 | `--max-output` | `16384` | Gegenüber OpenCode deklariertes Ausgabe-Tokenlimit. |
 | `--system-prompt` | mitgelieferte `system-prompt.md` | In den Lauf geladene Instruktionsdatei. |

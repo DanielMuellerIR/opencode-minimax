@@ -99,15 +99,20 @@ $ python3 ./minimax_agent.py --dir ./demo --sandbox \
 $ python3 test_calc.py         # the model verifies its own fix
 OK
 
-$ git diff
+$ examples/_show-worktree-changes.py ...
  def average(numbers):
      # Return the mean of a list of numbers.
 +    if not numbers:
 +        return 0.0
      return sum(numbers) / len(numbers)
+
+After reviewing the diff, run its test now? [y/N] y
+OK
 ```
 
-Broken test → task in plain words → a small, correct change → green. That's the whole idea.
+Broken test → task in plain words → a complete, configuration-safe review → only then run
+the generated code. That's the whole idea. The outer demo never imports agent-written Python
+before you confirm that you inspected the shown change.
 
 ## Use it on your own code
 
@@ -173,8 +178,11 @@ this for you:
   outside the target folder, even by mistake. The only other writable place is the run's own
   temporary directory, which is deleted when the run ends — the temp and cache files of your
   other programs stay off limits.
-- **Always read the change before you keep it** (`git diff`). Treat the assistant as a fast,
-  capable helper whose work you check — not an oracle.
+- **Always read the complete change before you keep or execute it.** The fix and demo scripts
+  compare every tracked file with the base captured before the run, disable external diffs and
+  text conversion, ignore the worktree's writable `.git` file, and list untracked files in a
+  machine-readable status block. Treat the assistant as a fast, capable helper whose work you
+  check — not an oracle.
 - Never point `--dir` at your home folder or a broad path.
 - `--sandbox` confines **writes**, not reads, network access, or secrets. OpenCode inherits the
   caller's environment so delegated builds can find their toolchains, proxies, and credentials.
@@ -208,16 +216,13 @@ real cause is the setup. `minimax_agent.py` handles all four for you:
 3. **Bypass the global config to dodge plugin hangs.** A global `~/.config/opencode` can load
    an `@latest` plugin that revalidates against npm on every start and blocks OpenCode when
    npm is slow. An isolated `XDG_CONFIG_HOME` sidesteps it entirely.
-4. **Time out a stalled start — not a long task.** OpenCode occasionally stalls at session
-   start (a small title/provider-init call) while the API itself is healthy. The stall
-   happens before the first tool call, so a restart is safe. The wrapper watches OpenCode's
-   output and counts *silence* only: a run that keeps printing is never cut off, however
-   long it takes, and only a run that never printed anything is restarted. A run that goes
-   quiet after it had already started is killed without a retry (exit code 124), so a second
-   attempt never continues on a half-finished work directory. Each attempt gets its own
-   process group, and every abort — timeout, Ctrl-C, `SIGTERM`, `SIGHUP` — kills that whole
-   group (OpenCode plus its `bun` children) before the temporary config is removed;
-   otherwise the model keeps editing files after you stopped the wrapper.
+4. **Time out silence without guessing whether work started.** The wrapper counts output
+   silence, not total runtime: a run that keeps printing is never cut off. A silent timeout
+   can still happen after a tool side effect, so automatic retry is disabled by default.
+   `--retries` is an explicit opt-in only for tasks whose startup cannot have side effects.
+   Every attempt gets its own process group, and completion or abort — timeout, Ctrl-C,
+   `SIGTERM`, `SIGHUP`, or even an exited OpenCode parent — removes remaining descendants
+   before the temporary config is removed.
 
 The whole thing is one Python file that you can read in one sitting.
 
@@ -226,7 +231,7 @@ The less common controls are explicit CLI flags:
 | Flag | Default | Effect |
 | --- | --- | --- |
 | `--timeout` | `300` | Seconds of output silence; `0` disables timeout and retry. |
-| `--retries` | `1` | Restarts after a silent start; never after output appeared. |
+| `--retries` | `0` | Explicit restarts after a completely silent run; use only for side-effect-free starts. |
 | `--context` | `1000000` | Context-window limit declared to OpenCode. |
 | `--max-output` | `16384` | Output-token limit declared to OpenCode. |
 | `--system-prompt` | bundled `system-prompt.md` | Instruction file injected into the run. |

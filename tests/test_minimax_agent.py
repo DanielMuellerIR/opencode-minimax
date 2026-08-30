@@ -4,6 +4,7 @@ import io
 import json
 import os
 import re
+import shlex
 import signal
 import stat
 import subprocess
@@ -46,10 +47,22 @@ def _marker():
     return "opencode-minimax-selftest-" + uuid.uuid4().hex
 
 
+def _pid_file(marker):
+    return Path(tempfile.gettempdir()) / (marker + ".pid")
+
+
 def _own_pids(marker):
-    """PIDs der eigenen Hilfsprozesse zu diesem Marker (leer, wenn keiner mehr laeuft)."""
-    found = subprocess.run(["pgrep", "-f", marker], capture_output=True, text=True)
-    return [int(pid) for pid in found.stdout.split()]
+    """Prueft die von den Hilfsprozessen selbst geschriebenen PIDs ohne externes pgrep."""
+    result = []
+    pattern = marker + "*.pid"
+    for path in Path(tempfile.gettempdir()).glob(pattern):
+        try:
+            pid = int(path.read_text(encoding="ascii"))
+            os.kill(pid, 0)
+        except (OSError, ValueError):
+            continue
+        result.append(pid)
+    return result
 
 
 def _kill_own(marker):
@@ -58,6 +71,11 @@ def _kill_own(marker):
         try:
             os.kill(pid, signal.SIGKILL)
         except ProcessLookupError:
+            pass
+    for path in Path(tempfile.gettempdir()).glob(marker + "*.pid"):
+        try:
+            path.unlink()
+        except FileNotFoundError:
             pass
 
 
@@ -103,39 +121,77 @@ class ApiKeyResolutionTests(unittest.TestCase):
         run_mock.assert_not_called()
 
     def test_custom_url_accepts_explicit_key_command(self):
-        completed = subprocess.CompletedProcess([], 0, "provider-secret\n", "")
-        with mock.patch.object(minimax_agent.subprocess, "run", return_value=completed) as run_mock:
+        proc = mock.Mock()
+        proc.communicate.return_value = ("provider-secret\n", "")
+        proc.returncode = 0
+        with mock.patch.object(minimax_agent.subprocess, "Popen", return_value=proc) as popen:
             key = minimax_agent.get_api_key("provider-key-helper", CUSTOM_URL)
 
         self.assertEqual(key, "provider-secret")
-        run_mock.assert_called_once_with(
-            "provider-key-helper", shell=True, capture_output=True, text=True,
-            timeout=minimax_agent.KEY_COMMAND_TIMEOUT,
+        popen.assert_called_once_with(
+            "provider-key-helper", shell=True, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True, start_new_session=True,
         )
+        proc.communicate.assert_called_once_with(timeout=minimax_agent.KEY_COMMAND_TIMEOUT)
 
     def test_failed_key_command_never_falls_back_to_environment(self):
-        completed = subprocess.CompletedProcess([], 3, "not-a-key\n", "vault locked\n")
+        proc = mock.Mock()
+        proc.communicate.return_value = ("not-a-key\n", "secret diagnostic\n")
+        proc.returncode = 3
         with mock.patch.dict(os.environ, {"MINIMAX_API_KEY": "fallback-secret"}, clear=True):
-            with mock.patch.object(minimax_agent.subprocess, "run", return_value=completed):
-                key = minimax_agent.get_api_key("provider-key-helper")
+            with mock.patch.object(minimax_agent.subprocess, "Popen", return_value=proc):
+                with mock.patch.object(minimax_agent.sys, "stderr", io.StringIO()) as error:
+                    key = minimax_agent.get_api_key("provider-key-helper")
 
         self.assertIsNone(key)
+        self.assertNotIn("secret diagnostic", error.getvalue())
+        self.assertIn("exit code 3", error.getvalue())
 
     def test_key_command_rejects_multiple_output_lines(self):
-        completed = subprocess.CompletedProcess([], 0, "warning\nprovider-secret\n", "")
-        with mock.patch.object(minimax_agent.subprocess, "run", return_value=completed):
+        proc = mock.Mock()
+        proc.communicate.return_value = ("warning\nprovider-secret\n", "")
+        proc.returncode = 0
+        with mock.patch.object(minimax_agent.subprocess, "Popen", return_value=proc):
             key = minimax_agent.get_api_key("provider-key-helper")
 
         self.assertIsNone(key)
 
     def test_key_command_timeout_is_a_hard_failure(self):
-        with mock.patch.object(
-            minimax_agent.subprocess, "run",
-            side_effect=subprocess.TimeoutExpired("provider-key-helper", 30),
-        ):
-            key = minimax_agent.get_api_key("provider-key-helper")
+        proc = mock.Mock()
+        proc.communicate.side_effect = [
+            subprocess.TimeoutExpired("provider-key-helper", 30), ("", "")
+        ]
+        with mock.patch.object(minimax_agent.subprocess, "Popen", return_value=proc):
+            with mock.patch.object(minimax_agent, "kill_process_group") as kill_group:
+                key = minimax_agent.get_api_key("provider-key-helper")
 
         self.assertIsNone(key)
+        kill_group.assert_called_once_with(proc)
+        self.assertEqual(proc.communicate.call_count, 2)
+
+    def test_key_command_timeout_kills_its_descendants(self):
+        marker = _marker()
+        pidfile = _pid_file(marker + "-key-helper")
+        child = (
+            "import os,sys,time; open(sys.argv[1], 'w').write(str(os.getpid())); "
+            "time.sleep(60)"
+        )
+        parent = (
+            "import subprocess,sys,time; "
+            "subprocess.Popen([sys.executable, '-c', %r, %r]); time.sleep(60)"
+            % (child, str(pidfile))
+        )
+        command = "%s -c %s" % (shlex.quote(sys.executable), shlex.quote(parent))
+        try:
+            with mock.patch.object(minimax_agent, "KEY_COMMAND_TIMEOUT", 0.2):
+                key = minimax_agent.get_api_key(command)
+
+            self.assertIsNone(key)
+            self.assertTrue(pidfile.exists(), "Key-Hilfsprozess startete nicht")
+            self.assertTrue(_wait_until(lambda: not _own_pids(marker), 5),
+                            "Key-Hilfsprozess lief nach dem Timeout weiter")
+        finally:
+            _kill_own(marker)
 
     def test_default_url_keeps_environment_fallback(self):
         with mock.patch.dict(os.environ, {"MINIMAX_API_KEY": "minimax-secret"}, clear=True):
@@ -242,6 +298,39 @@ class TemporaryConfigTests(_RunStubMixin, unittest.TestCase):
             result = self._run_with_stub(td, inspect_run)
 
             self.assertEqual(result, 0)
+
+    def test_cleanup_recovers_from_permissions_changed_by_an_unsandboxed_child(self):
+        with tempfile.TemporaryDirectory(prefix="opencode_minimax_cleanup_") as td:
+            def inspect_run(_cmd, env, _timeout, _retries):
+                cfg = Path(env["OPENCODE_CONFIG"])
+                runtime = Path(env["XDG_DATA_HOME"]).parent
+                (runtime / "state").mkdir(parents=True)
+                (runtime / "state" / "child-data").write_text("leftover")
+                os.chmod(runtime / "state", 0)
+                os.chmod(runtime, 0)
+                os.chmod(cfg.parent, 0)
+                return 0
+
+            result = self._run_with_stub(td, inspect_run)
+
+        self.assertEqual(result, 0)
+
+    def test_cleanup_failure_changes_a_successful_run_to_an_error(self):
+        real_remove = minimax_agent.remove_temp_home
+        with tempfile.TemporaryDirectory(prefix="opencode_minimax_cleanup_error_") as td:
+            def inspect_run(_cmd, _env, _timeout, _retries):
+                return 0
+
+            def remove_but_report_failure(path):
+                real_remove(path)
+                return False
+
+            with mock.patch.object(
+                minimax_agent, "remove_temp_home", side_effect=remove_but_report_failure
+            ):
+                result = self._run_with_stub(td, inspect_run)
+
+        self.assertEqual(result, 2)
 
     def test_custom_provider_child_environment_excludes_minimax_key(self):
         with tempfile.TemporaryDirectory(prefix="opencode_minimax_custom_env_") as td:
@@ -352,6 +441,11 @@ class SandboxConfinementTests(_RunStubMixin, unittest.TestCase):
                 profile = Path(cmd[2]).read_text(encoding="utf-8")
                 self.assertIn("(deny file-write*)", profile)
                 self.assertEqual(cmd[3], "opencode")
+                cfg = Path(_env["OPENCODE_CONFIG"])
+                runtime = Path(_env["XDG_DATA_HOME"]).parent
+                self.assertNotEqual(cfg.parent, runtime)
+                self.assertIn('(subpath "%s")' % runtime.resolve(), profile)
+                self.assertNotIn('(subpath "%s")' % cfg.parent.resolve(), profile)
                 return 0
 
             with mock.patch.object(minimax_agent.sys, "platform", "darwin"):
@@ -365,8 +459,9 @@ class SandboxConfinementTests(_RunStubMixin, unittest.TestCase):
                 scratch = Path(env["TMPDIR"])
                 self.assertEqual(env["TMP"], env["TMPDIR"])
                 self.assertEqual(env["TEMP"], env["TMPDIR"])
-                self.assertEqual(scratch.parent.parent, Path(td))
-                self.assertTrue(scratch.parent.name.startswith("opencode-minimax-"))
+                self.assertEqual(scratch.parent.parent.parent, Path(td))
+                self.assertEqual(scratch.parent.name, "runtime")
+                self.assertTrue(scratch.parent.parent.name.startswith("opencode-minimax-"))
                 self.assertTrue(scratch.is_dir())
                 return 0
 
@@ -433,10 +528,13 @@ class TimeoutSemanticsTests(unittest.TestCase):
 
     def test_normal_exit_does_not_wait_for_inherited_pipe_descriptors(self):
         marker = _marker()
+        pidfile = _pid_file(marker + "-background")
         body = (
             "import subprocess, sys\n"
-            "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)', %r])\n"
-            "print('parent done', flush=True)\n" % (marker + "-background")
+            "subprocess.Popen([sys.executable, '-c', "
+            "'import os,sys,time; open(sys.argv[1], \\\"w\\\").write(str(os.getpid())); "
+            "time.sleep(60)', %r])\n"
+            "print('parent done', flush=True)\n" % str(pidfile)
         )
         started = time.monotonic()
         try:
@@ -447,17 +545,21 @@ class TimeoutSemanticsTests(unittest.TestCase):
 
             self.assertEqual(rc, 0)
             self.assertLess(time.monotonic() - started, 2)
+            self.assertTrue(_wait_until(lambda: not _own_pids(marker), 5),
+                            "Enkelprozess lief nach normalem Ende weiter")
         finally:
             _kill_own(marker)
 
     def test_timeout_does_not_wait_for_an_escaped_pipe_holder(self):
         marker = _marker()
+        pidfile = _pid_file(marker + "-escaped")
         body = (
             "import subprocess, sys, time\n"
             "subprocess.Popen([sys.executable, '-c', "
-            "'import os,time; os.setsid(); time.sleep(60)', %r])\n"
+            "'import os,sys,time; os.setsid(); open(sys.argv[1], \\\"w\\\").write("
+            "str(os.getpid())); time.sleep(60)', %r])\n"
             "print('session started', flush=True)\n"
-            "time.sleep(60)\n" % (marker + "-escaped")
+            "time.sleep(60)\n" % str(pidfile)
         )
         started = time.monotonic()
         try:
@@ -471,8 +573,23 @@ class TimeoutSemanticsTests(unittest.TestCase):
         finally:
             _kill_own(marker)
 
-    def test_silent_start_is_killed_and_retried(self):
+    def test_default_silent_start_is_not_retried_after_a_possible_side_effect(self):
         with tempfile.TemporaryDirectory(prefix="opencode_minimax_stall_") as td:
+            attempts = Path(td) / "attempts"
+            body = (
+                "import time\n"
+                "open(%r, 'a').write('x')\n"
+                "time.sleep(60)\n" % str(attempts)
+            )
+            rc = minimax_agent.run_with_timeout(
+                self._helper(body), os.environ.copy(), 1, minimax_agent.DEFAULT_RETRIES
+            )
+
+            self.assertEqual(rc, 124)
+            self.assertEqual(attempts.read_text(), "x")
+
+    def test_explicit_retry_remains_available_for_side_effect_free_starts(self):
+        with tempfile.TemporaryDirectory(prefix="opencode_minimax_retry_opt_in_") as td:
             attempts = Path(td) / "attempts"
             body = (
                 "import time\n"
@@ -482,7 +599,7 @@ class TimeoutSemanticsTests(unittest.TestCase):
             rc = minimax_agent.run_with_timeout(self._helper(body), os.environ.copy(), 1, 1)
 
             self.assertEqual(rc, 124)
-            self.assertEqual(attempts.read_text(), "xx")  # Start-Haenger: genau ein Neustart
+            self.assertEqual(attempts.read_text(), "xx")
 
     def test_stall_after_first_output_is_not_retried(self):
         with tempfile.TemporaryDirectory(prefix="opencode_minimax_progress_") as td:
@@ -503,10 +620,13 @@ class TimeoutSemanticsTests(unittest.TestCase):
 
     def test_timeout_kills_the_whole_process_group(self):
         marker = _marker()
+        pidfile = _pid_file(marker + "-grandchild")
         body = (
             "import subprocess, sys, time\n"
-            "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)', %r])\n"
-            "time.sleep(60)\n" % (marker + "-grandchild")
+            "subprocess.Popen([sys.executable, '-c', "
+            "'import os,sys,time; open(sys.argv[1], \\\"w\\\").write(str(os.getpid())); "
+            "time.sleep(60)', %r])\n"
+            "time.sleep(60)\n" % str(pidfile)
         )
         try:
             rc = minimax_agent.run_with_timeout(self._helper(body), os.environ.copy(), 1, 0)
@@ -530,22 +650,26 @@ class TimeoutSemanticsTests(unittest.TestCase):
 
         self.assertEqual(rc, 2)
 
-    def test_finished_child_is_not_signalled_again(self):
+    def test_finished_child_without_remaining_group_is_not_signalled_again(self):
         proc = mock.Mock()
         proc.poll.return_value = 0
-        with mock.patch.object(minimax_agent.os, "killpg") as killpg:
+        with mock.patch.object(
+            minimax_agent.os, "killpg", side_effect=ProcessLookupError
+        ) as killpg:
             minimax_agent.kill_process_group(proc, grace=0.01)
 
-        killpg.assert_not_called()
+        killpg.assert_called_once_with(proc.pid, 0)
 
     def test_group_kill_escalates_past_an_exited_parent(self):
         marker = _marker()
+        pidfile = _pid_file(marker + "-grandchild")
         body = (
             "import signal, subprocess, sys, time\n"
             "subprocess.Popen([sys.executable, '-c', "
-            "'import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+            "'import os,signal,sys,time; open(sys.argv[1], \\\"w\\\").write("
+            "str(os.getpid())); signal.signal(signal.SIGTERM, signal.SIG_IGN); "
             "time.sleep(60)', %r])\n"
-            "time.sleep(60)\n" % (marker + "-grandchild")
+            "time.sleep(60)\n" % str(pidfile)
         )
         proc = subprocess.Popen(
             self._helper(body) + [marker], start_new_session=True
@@ -581,13 +705,16 @@ class ProcessLifecycleTests(unittest.TestCase):
         bindir.mkdir()
         fake = bindir / "opencode"
         if fake_body is None:
+            grandchild_pidfile = _pid_file(task + "-grandchild")
+            foreground_pidfile = _pid_file(task + "-foreground")
             fake_body = (
                 "#!/bin/sh\n"
                 "# Kein echtes OpenCode: startet zwei markierte Prozesse und wartet.\n"
-                "%s -c 'import time; time.sleep(900)' %s-grandchild &\n"
+                "%s -c 'import os,sys,time; open(sys.argv[1], \"w\").write(str(os.getpid())); time.sleep(900)' %s &\n"
                 "echo fake-opencode-running\n"
-                "exec %s -c 'import time; time.sleep(900)' %s-foreground\n"
-                % (sys.executable, task, sys.executable, task)
+                "exec %s -c 'import os,sys,time; open(sys.argv[1], \"w\").write(str(os.getpid())); time.sleep(900)' %s\n"
+                % (sys.executable, grandchild_pidfile,
+                   sys.executable, foreground_pidfile)
             )
         fake.write_text(fake_body)
         fake.chmod(0o755)
@@ -701,12 +828,17 @@ class CliValidationTests(unittest.TestCase):
 
 
 class ExampleScriptTests(unittest.TestCase):
-    def _fake_path(self, td, *, uname="Linux", python_rc=0):
+    def _fake_path(self, td, *, uname="Linux", uname_rc=0, python_rc=0):
         bindir = Path(td) / "fake-bin"
         bindir.mkdir()
-        (bindir / "uname").write_text("#!/bin/sh\nprintf '%s\\n' \"$FAKE_UNAME\"\n")
+        (bindir / "uname").write_text(
+            "#!/bin/sh\nprintf '%s\\n' \"$FAKE_UNAME\"\nexit \"$FAKE_UNAME_RC\"\n"
+        )
         (bindir / "python3").write_text(
-            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$FAKE_CAPTURE\"\n"
+            "#!/bin/sh\n"
+            "case \"${1-}\" in *'_show-worktree-changes.py') "
+            "exec \"$FAKE_REAL_PYTHON\" \"$@\";; esac\n"
+            "printf '%s\\n' \"$@\" > \"$FAKE_CAPTURE\"\n"
             "exit \"$FAKE_PYTHON_RC\"\n"
         )
         for helper in (bindir / "uname", bindir / "python3"):
@@ -716,8 +848,10 @@ class ExampleScriptTests(unittest.TestCase):
             os.environ,
             PATH="%s:/usr/bin:/bin" % bindir,
             FAKE_UNAME=uname,
+            FAKE_UNAME_RC=str(uname_rc),
             FAKE_CAPTURE=str(capture),
             FAKE_PYTHON_RC=str(python_rc),
+            FAKE_REAL_PYTHON=sys.executable,
         )
         return env, capture
 
@@ -735,6 +869,19 @@ class ExampleScriptTests(unittest.TestCase):
                     self.assertEqual(proc.returncode, 0, proc.stderr)
                     args = capture.read_text(encoding="utf-8").splitlines()
                     self.assertEqual("--sandbox" in args, expected)
+
+    def test_shared_launcher_fails_closed_when_uname_fails(self):
+        launcher = REPO / "examples/_run-agent.sh"
+        with tempfile.TemporaryDirectory(prefix="opencode_minimax_uname_failure_") as td:
+            env, capture = self._fake_path(td, uname="Darwin", uname_rc=1)
+            proc = subprocess.run(
+                [str(launcher), "--dir", "/tmp/project", "synthetic task"],
+                env=env, capture_output=True, text=True, timeout=10,
+            )
+
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("could not determine", proc.stderr)
+        self.assertFalse(capture.exists(), "agent started after platform detection failed")
 
     def test_fix_example_keeps_and_reports_partial_work_after_timeout(self):
         with tempfile.TemporaryDirectory(prefix="opencode_minimax_fix_script_") as td:
@@ -786,6 +933,88 @@ class ExampleScriptTests(unittest.TestCase):
             self.assertIn("uncommitted changes", proc.stderr)
             self.assertFalse(capture.exists(), "agent launcher ran despite dirty source")
 
+    def test_trusted_change_view_ignores_replaced_dot_git_and_lists_untracked_files(self):
+        helper = REPO / "examples/_show-worktree-changes.py"
+        with tempfile.TemporaryDirectory(prefix="opencode_minimax_safe_diff_") as td:
+            repo = Path(td) / "repo"
+            work = Path(td) / "work"
+            repo.mkdir()
+            subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+            (repo / "tracked.txt").write_text("base\n")
+            subprocess.run(["git", "-C", str(repo), "add", "tracked.txt"], check=True)
+            subprocess.run([
+                "git", "-C", str(repo), "-c", "user.name=Test",
+                "-c", "user.email=test@example.invalid", "commit", "-qm", "base",
+            ], check=True)
+            base = subprocess.check_output(
+                ["git", "-C", str(repo), "rev-parse", "HEAD"], text=True
+            ).strip()
+            git_dir = subprocess.check_output(
+                ["git", "-C", str(repo), "rev-parse", "--absolute-git-dir"], text=True
+            ).strip()
+            subprocess.run(
+                ["git", "-C", str(repo), "worktree", "add", "-fq", str(work), "HEAD"],
+                check=True,
+            )
+            (work / "tracked.txt").write_text("changed\n")
+            (work / "new.txt").write_text("new\n")
+            dot_git = work / ".git"
+            dot_git.unlink()
+            dot_git.mkdir()
+            escaped = Path(td) / "escaped"
+            evil = Path(td) / "evil.sh"
+            evil.write_text("#!/bin/sh\ntouch \"$ESCAPED\"\n")
+            evil.chmod(0o755)
+            (dot_git / "config").write_text("[diff]\n\texternal = %s\n" % evil)
+            subprocess.run(
+                ["git", "-C", str(repo), "config", "diff.external", str(evil)], check=True
+            )
+            env = dict(os.environ, ESCAPED=str(escaped))
+
+            proc = subprocess.run([
+                sys.executable, str(helper), "--git-dir", git_dir,
+                "--work-tree", str(work), "--base", base,
+            ], env=env, capture_output=True, text=True, timeout=10)
+            escaped_exists = escaped.exists()
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("-base", proc.stdout)
+        self.assertIn("+changed", proc.stdout)
+        self.assertIn('"?? new.txt"', proc.stdout)
+        self.assertFalse(escaped_exists, "agent-controlled external diff ran outside")
+
+    def test_supervisor_forwards_sigterm_to_the_agent_child(self):
+        marker = _marker()
+        pidfile = _pid_file(marker)
+        try:
+            with tempfile.TemporaryDirectory(prefix="opencode_minimax_forward_signal_") as td:
+                root = Path(td)
+                launcher = root / "_run-agent.sh"
+                launcher.write_text(
+                    "#!/bin/sh\nexec %s -c 'import os,sys,time; "
+                    "open(sys.argv[1], \"w\").write(str(os.getpid())); time.sleep(60)' %s\n"
+                    % (sys.executable, pidfile)
+                )
+                launcher.chmod(0o755)
+                driver = root / "driver.sh"
+                driver.write_text(
+                    "#!/usr/bin/env bash\nset -euo pipefail\n"
+                    "here=%s\nsource %s\nrun_agent_supervised synthetic\n"
+                    % (root, REPO / "examples/_example-lib.sh")
+                )
+                driver.chmod(0o755)
+                proc = subprocess.Popen([str(driver)])
+                self.assertTrue(_wait_until(lambda: _own_pids(marker), 10),
+                                "Hilfsprozess startete nicht")
+                proc.send_signal(signal.SIGTERM)
+                proc.wait(timeout=10)
+
+                self.assertEqual(proc.returncode, 143)
+                self.assertTrue(_wait_until(lambda: not _own_pids(marker), 5),
+                                "Hilfsprozess lief nach SIGTERM weiter")
+        finally:
+            _kill_own(marker)
+
 
 class DocumentationTests(unittest.TestCase):
     """Prueft die zugesagten Aussagen selbst, nicht nur einzelne Stichwoerter.
@@ -833,20 +1062,24 @@ class DocumentationTests(unittest.TestCase):
     def test_advertised_entry_points_do_not_force_sandbox_on_other_systems(self):
         """Jeder beworbene Copy-and-paste-Einstieg muss auf Nicht-macOS laufen."""
         helper = (REPO / "examples/_run-agent.sh").read_text(encoding="utf-8")
-        branch = re.search(r'if \[ "\$\(uname -s\)" = "Darwin" \]; then(.*?)else(.*?)fi',
-                           helper, re.DOTALL)
-        self.assertIsNotNone(branch)
-        self.assertIn("--sandbox", branch.group(1))
-        self.assertNotIn("--sandbox", branch.group(2))
+        darwin = re.search(r'Darwin\)(.*?)Linux\)', helper, re.DOTALL)
+        linux = re.search(r'Linux\)(.*?)\n  \*\)', helper, re.DOTALL)
+        self.assertIsNotNone(darwin)
+        self.assertIsNotNone(linux)
+        self.assertIn("--sandbox", darwin.group(1))
+        self.assertNotIn("--sandbox", linux.group(1))
+        self.assertIn("could not determine the operating system", helper)
 
         scripts = sorted((REPO / "examples").glob("*.sh"))
         self.assertGreaterEqual(len(scripts), 4)
+        common = (REPO / "examples/_example-lib.sh").read_text(encoding="utf-8")
+        self.assertIn("_run-agent.sh", common)
         for script_path in scripts:
-            if script_path.name == "_run-agent.sh":
+            if script_path.name in ("_run-agent.sh", "_example-lib.sh"):
                 continue
             script = script_path.read_text(encoding="utf-8")
             with self.subTest(script=script_path.name):
-                self.assertIn("_run-agent.sh", script)
+                self.assertIn("_example-lib.sh", script)
                 self.assertNotIn("minimax_agent.py", script)
 
         for brief in sorted((REPO / "examples/briefs").glob("*.md")):

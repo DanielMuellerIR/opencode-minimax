@@ -11,6 +11,7 @@ set -euo pipefail
 repo="${1:?usage: fix-in-sandbox.sh /path/to/your/repo \"the task\"}"
 task="${2:?provide the task as the second argument}"
 here="$(cd "$(dirname "$0")" && pwd)"
+source "$here/_example-lib.sh"
 
 if [ -n "$(git -C "$repo" status --porcelain)" ]; then
   echo "ERROR: the source repository has uncommitted changes; commit them first" >&2
@@ -18,8 +19,11 @@ if [ -n "$(git -C "$repo" status --porcelain)" ]; then
 fi
 wt="$(mktemp -d)/wt"
 git -C "$repo" worktree add -f "$wt" HEAD >/dev/null
+work="$wt"
+trusted_git_dir="$(git -C "$repo" rev-parse --absolute-git-dir)"
+base_commit="$(git -C "$repo" rev-parse HEAD)"
 rc=0
-"$here/_run-agent.sh" --dir "$wt" "$task" || rc=$?
+run_agent_supervised --dir "$wt" "$task" || rc=$?
 
 echo
 if [ "$rc" -eq 124 ]; then
@@ -28,7 +32,7 @@ elif [ "$rc" -ne 0 ]; then
   echo "The agent exited with code $rc; the worktree is retained for inspection."
 fi
 echo "== review this diff; if good, commit it here and cherry-pick that commit =="
-git -C "$wt" --no-pager diff
+show_worktree_changes
 echo
 echo "Worktree: $wt"
 echo "Remove it with:  git -C '$repo' worktree remove --force '$wt'"
