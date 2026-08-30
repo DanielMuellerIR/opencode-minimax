@@ -1,0 +1,158 @@
+{
+  "schema_version": 2,
+  "project": "opencode-minimax",
+  "campaign": {
+    "id": "20260830T103654759044+0200",
+    "token_budget": 3000000,
+    "status": "complete",
+    "started_at": "2026-08-30T10:36:54+02:00",
+    "finished_at": "2026-08-30T10:45:11+02:00",
+    "finish_reason": "all-current"
+  },
+  "campaign_history": [],
+  "scope": {
+    "paths": [
+      "."
+    ],
+    "exclusions": [
+      {
+        "path": "LICENSE",
+        "reason": "Statischer Lizenztext ohne ausfuehrbare Projektlogik"
+      }
+    ]
+  },
+  "areas": [
+    {
+      "id": "agent-runtime",
+      "paths": [
+        "minimax_agent.py"
+      ],
+      "risk": "critical",
+      "priority": 1,
+      "reason": "Credential-Verarbeitung, Sandboxprofil, Prozessgruppen und OpenCode-Start sind die zentrale Sicherheitsgrenze.",
+      "state": "completed",
+      "last_run": {
+        "campaign_id": "20260830T103654759044+0200",
+        "completed_at": "2026-08-30T10:38:45+02:00",
+        "observed_head": "1a00a6c4728fa67554d1ff099b3356653902cae7",
+        "content_sha256": "e1f101935cbfa8ae5dc2766081935a397a776c217934c2de93729e745f524250",
+        "file_count": 1,
+        "review": "full",
+        "outcome": "improved",
+        "summary": "Credential-, Sandbox-, Prozessgruppen-, Pipe-, Cleanup- und CLI-Pfade vollstaendig geprueft; der Schluesselbund-Fallback besitzt nun wie der Key-Helfer eine feste Zeitgrenze und ruhige Fehlerpfade.",
+        "tests": [
+          "29 gezielte Credential-/Prozess-Tests und 57 Gesamttests gruen; py_compile und git diff --check gruen."
+        ]
+      }
+    },
+    {
+      "id": "example-workflows",
+      "paths": [
+        "examples"
+      ],
+      "risk": "high",
+      "priority": 2,
+      "reason": "Die beworbenen Wegwerf-Workflows entscheiden, welche Agentenausgaben geprueft oder ausgefuehrt werden.",
+      "state": "completed",
+      "last_run": {
+        "campaign_id": "20260830T103654759044+0200",
+        "completed_at": "2026-08-30T10:40:23+02:00",
+        "observed_head": "d0c1aeb437fad2fc6bd220cc73b71604ec07f2ba",
+        "content_sha256": "1ca4a7ffe26564dce6848faa2df794f89a63c2cf266d5a6f03317d1b933bbf35",
+        "file_count": 13,
+        "review": "full",
+        "outcome": "improved",
+        "summary": "Alle Shell-Abläufe, Briefvorlagen, Demo-Fixtures und der vertrauenswuerdige Diff-Helfer vollstaendig geprueft; Diff/Status streamen begrenzt, Git-Index-Refresh ist gesperrt und die Demo-Zusage gilt nun plattformneutral.",
+        "tests": [
+          "13 gezielte Beispiel-/Dokutests und 57 Gesamttests gruen; bash -n, py_compile und git diff --check gruen."
+        ]
+      }
+    },
+    {
+      "id": "regression-suite",
+      "paths": [
+        "tests"
+      ],
+      "risk": "high",
+      "priority": 3,
+      "reason": "Prozess- und Sandboxtests muessen Lecks verlaesslich erkennen und selbst aufraeumen.",
+      "state": "completed",
+      "last_run": {
+        "campaign_id": "20260830T103654759044+0200",
+        "completed_at": "2026-08-30T10:45:10+02:00",
+        "observed_head": "a58e31e5d6ded619f2c4833f2eee8c026b52b138",
+        "content_sha256": "f37fe67ce15d4e02faa6470acf587ddfe90eecf08a37be8ba256aa13047c638e",
+        "file_count": 2,
+        "review": "delta-plus-boundaries",
+        "outcome": "reviewed-clean",
+        "summary": "Nur zwei Assertions fuer den neuen AGENTS-Sicherheitsvertrag kamen hinzu; umgebender Strukturtest und verlinkte Dateien geprueft.",
+        "tests": [
+          "DocumentationTests 7/7 und Gesamtsuite 57/57 gruen."
+        ]
+      }
+    },
+    {
+      "id": "public-guidance",
+      "paths": [
+        "README.md",
+        "README.de.md",
+        "AGENTS.md",
+        "system-prompt.md",
+        ".gitignore",
+        "CLAUDE.md"
+      ],
+      "risk": "medium",
+      "priority": 4,
+      "reason": "Die englische Anleitung definiert die oeffentlichen Sicherheitszusagen und Copy-and-paste-Abläufe.",
+      "state": "completed",
+      "last_run": {
+        "campaign_id": "20260830T103654759044+0200",
+        "completed_at": "2026-08-30T10:45:11+02:00",
+        "observed_head": "a58e31e5d6ded619f2c4833f2eee8c026b52b138",
+        "content_sha256": "ba49c497d7c119cc7423e08b59ea4621e5e691b1b6cdcf5978b22215406b9bf1",
+        "file_count": 6,
+        "review": "delta-plus-boundaries",
+        "outcome": "improved",
+        "summary": "Neuer AGENTS-Sicherheitsvertrag samt CLAUDE-Symlink und angrenzender Strukturquelle geprueft; Worktree-/Sandbox-Terminologie ist mit README und Launcher konsistent.",
+        "tests": [
+          "DocumentationTests 7/7 und Gesamtsuite 57/57 gruen."
+        ]
+      }
+    }
+  ],
+  "architecture": {
+    "campaign_id": "20260830T103654759044+0200",
+    "recorded_at": "2026-08-30T10:36:55+02:00",
+    "observed_head": "89f4e6f3889d31e5fdbf8dd8a68cb0a88c36ec8e",
+    "summary": "minimax_agent.py buendelt Credential-Aufloesung, OpenCode-Konfiguration, Seatbelt-Profil und Prozessaufsicht; examples kapselt sichere Wegwerf-Workflows; tests prueft Kern und Skripte ohne Netzwerk.",
+    "paradigm": "Kleine stdlib-only Python-CLI mit Shell-Beispieladaptern und Black-Box-unittest-Suite",
+    "fit": "passt",
+    "recommendation": "Die Sicherheitsgrenzen in wenigen expliziten Helfern halten und jede neue Prozess- oder Git-Grenze mit echtem Kindprozess beziehungsweise Temp-Repo testen."
+  },
+  "themes": [
+    {
+      "id": "platform-safety-contract",
+      "summary": "Launcher, Beispielskripte und beide READMEs muessen dieselbe macOS-/Linux-Sicherheitsgrenze beschreiben.",
+      "evidence": [
+        "examples/_run-agent.sh",
+        "README.md",
+        "README.de.md",
+        "tests/test_minimax_agent.py"
+      ],
+      "priority": 1,
+      "state": "completed",
+      "noted_at": "2026-08-30T10:44:03+02:00",
+      "campaign_id": "20260830T103654759044+0200",
+      "started_at": "2026-08-30T10:44:03+02:00",
+      "completed": {
+        "campaign_id": "20260830T103654759044+0200",
+        "completed_at": "2026-08-30T10:44:59+02:00",
+        "observed_head": "a58e31e5d6ded619f2c4833f2eee8c026b52b138",
+        "summary": "AGENTS.md bindet Plattformzweig, beide Sprachfassungen, Assistentenanweisung und Regressionstest dauerhaft an dieselbe Worktree-/OS-Sandbox-Abgrenzung.",
+        "tests": [
+          "DocumentationTests 7/7 und Gesamtsuite 57/57 gruen."
+        ]
+      }
+    }
+  ]
+}
