@@ -14,7 +14,8 @@ und behältst es oder verwirfst es.
 ## TL;DR
 
 1. [OpenCode](https://opencode.ai) installieren und einen MiniMax-API-Key holen — ein
-   **Token-Plan**-Abo (der **Plus**-Plan für ~20 US$ enthält bereits ~1,7 Mrd. Tokens).
+   **M-Plan**-Abo (früher Token Plan). Aktuelle Stufen und Grenzen stehen in der
+   [MiniMax-Dokumentation](https://platform.minimax.io/docs/m-plan/intro).
 2. **Key einmal ablegen** im macOS-Schlüsselbund (verschlüsselte dauerhafte Ablage; Hinweis
    zur temporären Laufzeitdatei weiter unten):
    ```bash
@@ -43,12 +44,12 @@ Du brauchst drei Dinge:
    opencode --version
    ```
 2. **Python 3.8+** (nur Standardbibliothek — nichts zu installieren).
-3. **Einen MiniMax-API-Key aus einem Token Plan.** Am günstigsten nutzt man MiniMax über ein
-   **Token-Plan**-Abo — ein großes monatliches Token-Kontingent statt nutzungsabhängiger
-   Abrechnung. Der **Plus**-Plan (zum jetzigen Stand rund 20 US$/Monat) enthält bereits
-   ~1,7 Milliarden Tokens, was für delegierte Coding-Arbeit weit reicht. Auf der
-   [MiniMax-Plattform](https://www.minimax.io) einen Plan wählen, dann aus dem Abo einen
-   API-Key generieren.
+3. **Einen MiniMax-API-Key für den gewählten Zugang.** Das Abo heißt inzwischen
+   **M Plan** (früher Token Plan), mit den Stufen Go, Explore und Build.
+   Verbrauch und Grenzen hängen unter anderem von Modell, Kontextlänge und Aufgabe ab.
+   Prüfe vor der Einrichtung die [aktuellen Pläne und unterstützten Modelle](https://platform.minimax.io/docs/m-plan/intro).
+   Diese Anleitung beschreibt die vorhandene Integration; sie belegt keine Kompatibilität
+   mit später eingeführten Modellen.
 
    **Sicher ablegen (empfohlen, macOS).** Die dauerhafte Kopie im Schlüsselbund halten —
    dort bleibt sie verschlüsselt und aus deiner Shell-History heraus:

@@ -12,8 +12,8 @@ its own work. You review the result and keep it or throw it away.
 
 ## TL;DR
 
-1. Install [OpenCode](https://opencode.ai) and get a MiniMax API key — a **Token Plan**
-   subscription (the ~US$20 **Plus** plan already includes ~1.7 billion tokens).
+1. Install [OpenCode](https://opencode.ai) and get a MiniMax API key — a **M Plan**
+   subscription (formerly Token Plan). Check the [current tiers and limits](https://platform.minimax.io/docs/m-plan/intro).
 2. **Store the key once** in your macOS Keychain (encrypted persistent storage; see the
    temporary runtime-file note below):
    ```bash
@@ -40,11 +40,12 @@ You need three things:
    opencode --version
    ```
 2. **Python 3.8+** (standard library only — nothing to install).
-3. **A MiniMax API key from a Token Plan.** The cost-effective way to use MiniMax is a
-   **Token Plan** subscription — a large monthly bucket of tokens instead of metered
-   pay-per-use. The **Plus** plan (~US$20/month at the time of writing) already includes
-   ~1.7 billion tokens, plenty for delegated coding. Pick a plan on the
-   [MiniMax platform](https://www.minimax.io), then generate an API key from your subscription.
+3. **A MiniMax API key for your chosen access method.** The subscription is now
+   called **M Plan** (formerly Token Plan), with Go, Explore and Build tiers.
+   Usage and limits depend on the model, context length and task, among other factors.
+   Check the [current plans and supported models](https://platform.minimax.io/docs/m-plan/intro)
+   before setup. This guide describes the existing integration; it does not establish
+   compatibility with models introduced later.
 
    **Store it securely (recommended, macOS).** Keep the persistent copy in your Keychain —
    it stays encrypted at rest and out of your shell history:
